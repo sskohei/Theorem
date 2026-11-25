@@ -1,8 +1,8 @@
 # AI プロバイダー互換性・認証条件マトリクス（Provider Compatibility）
 
-> **ステータス**: 机上調査完了 / Phase 0 実機検証待ち
+> **ステータス**: Phase 0 実機検証反映（Codex・Antigravity・Custom ACP 検証済み / Claude Code 未検証）
 > **最終更新**: 2026-11-25
-> **重要**: 本ドキュメントは開発開始時点の公式公開情報に基づく整理であり、利用規約および認証仕様は変更される可能性がある。Phase 0 実装前およびリリース前に必ず各プロバイダーの最新公式ドキュメント・利用規約を再確認すること。
+> **重要**: 利用規約および認証仕様は変更される可能性があるため、リリース前にも必ず各プロバイダーの最新公式ドキュメント・利用規約を再確認すること。
 
 ---
 
@@ -26,105 +26,68 @@ FormulaDesk では、ユーザー自身の既存 AI サブスクリプション�
 
 ## 2. ステータス凡例
 
-- `動作確認済み`: Phase 0 以降の PoC / E2E テストで実機確認完了
-- `公式仕様確認済み（PoC未検証）`: 公式ドキュメントで仕様を確認済みだが、本環境での実機検証は未実施
-- `利用条件の確認が必要`: サブスクリプション利用規約・サードパーティクライアント条件の確認が未完了または制約あり
-- `未検証`: 技術仕様・動作ともに Phase 0 で検証予定
+- `動作確認済み（実機）`: Phase 0 PoC で実インストール済み公式ハーネスにより実機確認完了
+- `動作確認済み（モック）`: モックエージェントによるプロトコル・自動テスト確認完了（実機接続とは明確に区別）
+- `利用条件の確認が必要`: サブスクリプション利用規約・サードパーティクライアント条件の確認が継続必要または制約あり
+- `未検証`: 実機環境未導入または認証情報未提供のため未検証
 - `対応不可`: 技術的または規約上の理由によりサポート対象外
 
 ---
 
-## 3. プロバイダー別比較マトリクス（Phase 0 検証前）
+## 3. プロバイダー別比較マトリクス（Phase 0 検証反映）
 
 | 項目 | OpenAI Codex | Anthropic Claude Code | Google Antigravity | Custom ACP Agent |
 |---|---|---|---|---|
-| **公式ハーネス** | Codex CLI (`codex app-server`) | Claude Code CLI / Agent SDK | Antigravity CLI (`agy acp`) | 任意の ACP 準拠 CLI |
-| **推奨接続方式** | Codex App Server (JSON-RPC 2.0 / `stdio`) | 公式プロセス / Agent SDK / ACP アダプター（要確認） | 公式 ACP (JSON-RPC 2.0 / `stdio`) | 標準 ACP (JSON-RPC 2.0 / `stdio`) |
-| **技術仕様調査状況** | 公式仕様確認済み（PoC未検証） | 公式仕様確認済み（PoC未検証） | 公式仕様確認済み（PoC未検証） | 公式仕様確認済み（PoC未検証） |
-| **サブスクリプション認証** | ChatGPT Plus / Pro / Business 等（`codex login` / Sign in with ChatGPT） | **⚠️ 規約上の重要制約あり（下記詳細参照）** | Google AI Free / Pro / Ultra / Business（`agy acp --login`、利用形態条件あり） | エージェント依存 |
-| **API キー代替** | `OPENAI_API_KEY`（明示選択時のみ） | `ANTHROPIC_API_KEY`（明示選択時のみ・サードパーティ標準） | `GEMINI_API_KEY` / GCP Vertex AI（明示選択時のみ） | エージェント依存 |
-| **画像入力** | 未検証（Phase 0） | 未検証（Phase 0） | 未検証（Phase 0） | Capability 動的判定 |
-| **ストリーミング** | 未検証（Phase 0） | 未検証（Phase 0） | 未検証（Phase 0） | Capability 動的判定 |
-| **セッション再開** | 未検証（Phase 0） | 未検証（Phase 0） | 未検証（Phase 0） | Capability 動的判定 |
-| **処理キャンセル** | 未検証（Phase 0） | 未検証（Phase 0） | 未検証（Phase 0） | Capability 動的判定 |
-| **MCP 登録** | 未検証（Phase 0） | 未検証（Phase 0） | 未検証（Phase 0） | Capability 動的判定 |
-| **権限制御 / サンドボックス** | 未検証（Phase 0） | 未検証（Phase 0） | 未検証（Phase 0） | Capability 動的判定 |
-| **MVP における優先位置づけ** | 候補（Phase 0 実機・規約検証で判定） | 候補（API キーモード優先 / サブスク規約確認必須） | 候補（ACP クライアント規約・実機検証で判定） | 拡張対応 |
+| **検証バージョン** | `codex-cli 0.172.0` | 未導入（ローカル未検出） | `agy 1.5.12` | `poc/mock-acp-agent` |
+| **接続方式** | `codex app-server --stdio` (JSON-RPC 2.0) | 公式 CLI / Agent SDK / ACP（未検証） | `agy acp --stdio --sandbox` (公式 ACP) | 標準 ACP (JSON-RPC 2.0 / `stdio`) |
+| **起動・初期化** | 動作確認済み（実機） | 未検証 | 動作確認済み（実機） | 動作確認済み（モック） |
+| **公式認証確認** | 動作確認済み（実機：`account/read` → `chatgpt`、`OPENAI_API_KEY` 非継承確認） | 未検証 | 動作確認済み（実機：`authMethods` 4 種返却・既存認証継承） | 該当なし（エージェント依存） |
+| **サブスクリプション利用条件** | 利用条件の確認が必要（Sign in with ChatGPT Terms / ToS 継続確認、対話利用限定） | **⚠️ 規約上の重要制約あり（サブスク OAuth のサードパーティ流用禁止・API キー代替推奨）** | 利用条件の確認が必要（公式対話 ACP 利用可／個人プランでの無許可プロキシ・自動ループ禁止） | エージェント依存 |
+| **モデル一覧取得** | 動作確認済み（実機：`model/list` で 10 件取得） | 未検証 | 要確認（ACP 拡張またはモデル指定） | Capability 動的判定 |
+| **画像入力** | 動作確認済み（実機：`localImage` で数式 PNG 解読成功） | 未検証 | 動作確認済み（実機：base64 PNG ブロックで数式 PNG 解読成功） | 動作確認済み（モック） |
+| **ストリーミング** | 動作確認済み（実機：`item/agentMessage/delta` 24 デルタ） | 未検証 | 動作確認済み（実機：`session/update` 受信） | 動作確認済み（モック） |
+| **セッション再開** | 動作確認済み（実機：`thread/resume` 成功） | 未検証 | 動作確認済み（実機：`loadSession: true` + `session/load` 成功） | 動作確認済み（モック） |
+| **処理キャンセル** | 動作確認済み（実機：`turn/interrupt` → `status=interrupted`） | 未検証 | 動作確認済み（実機・要対策：`session/cancel` 後の残留バッファチャンク対策必要） | 動作確認済み（モック：`stopReason=cancelled`） |
+| **セッション単位 MCP 登録** | 動作確認済み（実機：`-c mcp_servers...` で `~/.codex/config.toml` 非改変を SHA-256 確認） | 未検証 | 動作確認済み（実機：`session/new` の `mcpServers` 引数で受理） | 動作確認済み（モック） |
+| **権限制御 / サンドボックス** | 動作確認済み（実機：`sandbox="read-only"`, `approvalPolicy="untrusted"` で実行要求を `decline`） | 未検証 | 動作確認済み（実機：`--sandbox` + `session/request_permission` をクライアント側で拒否） | 動作確認済み（モック） |
+| **MVP における優先位置づけ** | **MVP 第一優先候補（実機全機能確認済み）** | Phase 2 以降（API キー代替中心・規約確認継続） | **MVP 第二候補（実機確認済み・キャンセル残留対策要）** | 拡張対応（汎用 ACP 基盤共用） |
 
 ---
 
-## 4. プロバイダー別詳細調査・利用条件整理
+## 4. プロバイダー別詳細・Phase 0 実機所見
 
-### 4.1 OpenAI Codex（`codex app-server`）
+### 4.1 OpenAI Codex（`codex app-server --stdio`）
 
-- **接続仕様**:
-  - `codex app-server` を子プロセス起動し、改行区切り JSON-RPC 2.0 over `stdio` で双方向通信を行う。
-  - `initialize` ハンドシェイク、スレッド/ターン管理、ストリーミングイベント、ツール/承認フローをサポート。
-- **認証仕様**:
-  - ユーザーが事前に `codex login` を実行すると、ローカル認証ストア（`~/.codex/auth.json` 等）に OAuth セッションが保存される。
-  - 認証状態は `codex login status` で確認可能。
-  - **誤課金防止設計**: サブスクリプション利用プロファイル選択時は、子プロセスへ環境変数 `OPENAI_API_KEY` を引き継がない（意図せず従量課金 API へフォールバックすることを防ぐ）。
-- **利用規約・コンプライアンス上の確認事項**:
-  - OpenAI の *Using your ChatGPT plan in other apps and sites*、*Sign in with ChatGPT Terms*、*OpenAI Terms of Use* / *Service Terms* を参照する。
-  - パスワード収集・トークン抽出・利用上限回避は禁止。認証は完全に公式 `codex login` に委ね、ユーザー操作起点の対話的学習用途として利用する。
-  - **ステータス**: `利用条件の確認が必要`（数学・物理学習用デスクトップクライアントからローカル `codex app-server` を対話利用する形態の適合性を Phase 0 で最終確認する）。
+- **Phase 0 実機所見**:
+  - `codex app-server generate-json-schema` で公式プロトコル v2 スキーマを取得可能であり、推測実装を排除できた。
+  - 子プロセス環境から `OPENAI_API_KEY` を完全除去した状態で `account/read` が `chatgpt`（ChatGPT サブスクリプション）を返却し、従量課金への無断フォールバックを確実に防止できた。
+  - `-c mcp_servers.poc_science.command=...` により、`~/.codex/config.toml` の SHA-256 ハッシュを一切変化させずにセッション限定 MCP サーバーを登録できた。
+  - `sandbox: "read-only"` + `approvalPolicy: "untrusted"` 設定下では、シェル実行要求時に `item/commandExecution/requestApproval` がクライアントへ届き、`{"decision": "decline"}` でコマンド実行を安全に阻止できた。
+  - `turn/start` は `outputSchema`（JSON Schema 強制）にも対応しており、Phase 2 の構造化解答生成に極めて有利。
+- **規約・コンプライアンス上の継続注意**:
+  - OpenAI の *Sign in with ChatGPT Terms* および *Terms of Use* に従い、ユーザー明示操作起点の対話的学習利用に限定し、無人バッチや上限回避を禁止する。
 
-### 4.2 Anthropic Claude Code
+### 4.2 Google Antigravity（`agy acp --stdio --sandbox --disable-telemetry`）
 
-- **接続仕様**:
-  - 公式 Claude Code CLI、Claude Agent SDK、または ACP アダプター経由の接続が技術的候補となる。
-- **⚠️ サブスクリプション利用規約に関する重要所見**:
-  - 公開ドキュメントおよび規約（Anthropic Consumer Terms of Service / Claude Code *Legal and compliance*）では、**Claude Free / Pro / Max / Team / Enterprise のサブスクリプション OAuth トークンは、公式の未改変 Claude Code および Claude.ai のネイティブ利用専用**とされている。
-  - サードパーティ製アプリや外部エージェントハーネス・Agent SDK において、ユーザーのサブスクリプション OAuth 認証情報を抽出・中継・流用することは規約違反とされ、サーバー側でもブロック対象となり得る。
-  - 一方、サードパーティ製品や Agent SDK 統合では **Claude Console の API キー（従量課金）** の利用が公式に案内されている。
-- **FormulaDesk での対応方針**:
-  1. **サブスクリプション OAuth トークンの抽出・中継は絶対に実装しない**。
-  2. Claude Code のサブスクリプション認証による外部クライアント統合は、Phase 0 で最新公式ドキュメント（`code.claude.com/docs/en/legal-and-compliance`）を再確認し、明確に許可されている形態が確認できない限り**サブスクリプション自動連携は無効（`利用条件の確認が必要`）**とする。
-  3. ユーザーが明示的に同意し API キーを設定した場合の API キー認証モード（OS キーチェーン保存）を、許可された正規の代替手段として位置づける。決して無断で従量課金へ切り替えない。
+- **Phase 0 実機所見**:
+  - `agy 1.5.12` が標準 ACP を内蔵しており、JSON-RPC 2.0 over `stdio` で `initialize` / `session/new` / `session/load` / `session/prompt` / `session/cancel` / `session/request_permission` が動作することを確認。
+  - `authMethods` として `oauth-personal` / `oauth-business` / `gemini-api-key` / `agent-platform` が公開されており、Capability Negotiation と親和性が高い。
+  - `--sandbox` + クライアント側 `session/request_permission` 拒否によりシェル実行を阻止できた。
+  - **発見した技術リスク**: `session/cancel` 送信後、直前ターンの `session/update` 通知がパイプ内に残留して後続ターンへ混入する現象を確認した。Phase 2 の `AgentManager` ではキャンセル後のドレイン待機またはセッション/ストリーム境界の厳格分離を実装する。
+- **規約・コンプライアンス上の継続注意**:
+  - 個人コンシューマープラン（`oauth-personal`）では薄い対話的 ACP クライアント利用にとどめ、システムプロンプト改変・履歴自動リプレイ・無人ループを行わないこと。
 
-### 4.3 Google Antigravity（`agy acp`）
+### 4.3 Anthropic Claude Code
 
-- **接続仕様**:
-  - Antigravity CLI（`agy`）は公式に **Agent Client Protocol (ACP)** サーバー（`agy acp`）を内蔵しており、JSON-RPC 2.0 over `stdio` でクライアントと通信する。
-  - Rust の `agent-client-protocol` クレートを用いたクライアント統合と親和性が高い。
-- **認証仕様**:
-  - ローカルの `agy` 認証（`agy acp --login` 等）を継承する。
-  - 個人向け（Free / Google AI Pro / Google AI Ultra）のほか、企業/GCP 向け（Vertex AI / Agent Platform）や `GEMINI_API_KEY` 経路が存在する。
-- **利用規約・コンプライアンス上の確認事項**:
-  - 公式エディタや薄い対話的 ACP クライアント（Antigravity が中核エージェントとして動作し、ユーザー操作起点で対話する形態）での利用は ACP の本来の用途である。
-  - 一方、個人コンシューマープラン（`oauth-personal`）を用いた**無許可プロキシ化・システムプロンプトの改変・シリアライズ履歴の自動リプレイ・自律バッチループ**は規約違反やアカウント制限のリスクがある。
-  - **ステータス**: `利用条件の確認が必要`（対話的 ACP クライアントとしての利用範囲、個人サブスクリプション vs API キー/GCP 連携の境界を Phase 0 で確認する）。
+- **Phase 0 状況**: 本開発環境には `claude` CLI が未インストールのため実機接続は `未検証`。
+- **利用規約上の重要制約**:
+  - Anthropic Consumer Terms of Service および Claude Code *Legal and compliance* では、サブスクリプション OAuth トークンは公式未改変 Claude Code / Claude.ai 専用とされ、サードパーティクライアントでの OAuth 流用・中継は禁止されている。
+  - したがって FormulaDesk では、サブスクリプション OAuth の無断流用を絶対に実装せず、最新公式規約で明確に許可された方式、またはユーザーの明示的同意に基づく **API キー認証（OS キーチェーン保管）** のみを有効化する方針を維持する。
 
 ### 4.4 カスタム ACP エージェント（Custom ACP）
 
-- **接続仕様**:
-  - ユーザーが任意の ACP 準拠バイナリパスと引数を登録し、`initialize` ハンドシェイクによる Capability Negotiation で動的に機能判定を行う。
-- **セキュリティ条件**:
-  - FormulaDesk の必須セキュリティ要件（任意シェル禁止・隔離ワークスペース制限・権限フック）を満たせないカスタムエージェントは、安全制御が確認できるまで該当機能（自動ツール実行等）を無効化し、ユーザーへ警告を表示する。
-
----
-
-## 5. MVP 開発におけるリスク緩和方針
-
-- Codex・Claude Code・Antigravity の 3 種類対応は正式版（Phase 6）の重要要件とする。
-- Phase 0 検証の結果、一部のプロバイダーに規約上の制限または技術的障壁が判明した場合でも、**利用条件および動作に問題のない少なくとも 1 つの公式ハーネスを優先採用して MVP 開発を継続する**。
-- 未検証または規約未確認のプロバイダーについては、UI 上で「動作確認済み」と誤認させず、正確なステータス（未検証 / API キーのみ対応 / 利用条件確認中など）を表示する。
-
----
-
-## 6. Phase 0 検証チェックリスト（各プロバイダー共通）
-
-各プロバイダーについて Phase 0 で以下を実機検証し、結果を本ドキュメントおよび [implementation-status.md](./implementation-status.md) へ記録する。
-
-- [ ] 公式バイナリ検出・バージョン取得
-- [ ] 公式認証方式の確認（認証情報なしでの疑似成功扱いは禁止）
-- [ ] 最新利用規約・サブスクリプション利用条件の記録
-- [ ] 基本テキスト応答 + ストリーミング受信
-- [ ] 画像入力（問題 PDF ページ PNG からの数式認識）
-- [ ] セッション作成および再開（非対応時は挙動記録）
-- [ ] 処理キャンセル（途中中断と子プロセス健全性）
-- [ ] Science MCP のセッション単位登録・ツール呼び出し
-- [ ] 権限制御（任意シェル禁止・ワークスペース外アクセス遮断）
+- `poc/mock-acp-agent/acp_echo_agent.py` により、汎用 ACP クライアント（`poc/harness-poc/src/acp.rs`）の初期化・Capability 判定・MCP 渡し・ストリーミング・画像ブロック・再開・キャンセル・権限拒否を自動テスト検証済み。
+- 本番実装でも `initialize` 応答に基づき未対応機能・安全制御不可機能を適切に無効化する。
 
 ---
 
@@ -133,3 +96,4 @@ FormulaDesk では、ユーザー自身の既存 AI サブスクリプション�
 - [AI ハーネス統合設計（agent-integration.md）](./agent-integration.md)
 - [セキュリティ設計（security.md）](./security.md)
 - [実装・検証状況（implementation-status.md）](./implementation-status.md)
+- [Phase 0 PoC レポート（poc/README.md）](../poc/README.md)

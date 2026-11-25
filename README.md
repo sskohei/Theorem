@@ -5,8 +5,8 @@
 **FormulaDesk**（仮称）は、大学数学・大学物理の学習に特化した、オープンソースかつローカルファーストなデスクトップアプリケーションです。
 PDF や画像形式の問題を取り込むと、ユーザーが既に利用している公式 AI ハーネスと連携して問題文を認識し、途中式・論理的証明・計算検証・図やグラフを含む解答を生成します。生成した解答は Typst で高品質な日本語・数式入り PDF としてローカルに保存でき、問題や解答について AI と継続的に議論・検証・修正できます。
 
-> **現在のプロジェクトステータス**: **Pre-MVP（設計ドキュメント整備完了・Phase 0 技術検証着手待ち）**
-> 現時点では仕様書・設計ドキュメント・ADR・Phase ごとの開発 Issue を整備済みであり、アプリケーション本体の実装は Phase 0（PoC）から段階的に進めます。最新の進捗と検証状況は [docs/implementation-status.md](./docs/implementation-status.md) を参照してください。
+> **現在のプロジェクトステータス**: **Pre-MVP（設計ドキュメント整備・Phase 0 PoC 実装完了 / Phase 1 アプリ基盤着手可能）**
+> 仕様書・設計ドキュメント・ADR・Phase 0 実行可能 PoC（`poc/`）を整備・検証済みです（外部認証が必要な実 Google Drive OAuth・未導入の Claude Code 実機検証のみ保留）。最新の進捗と検証状況は [docs/implementation-status.md](./docs/implementation-status.md) を参照してください。
 
 ---
 
@@ -67,7 +67,7 @@ FormulaDesk
 
 | Phase | 名称 | 区分 | Issue | ステータス |
 |---|---|---|---|---|
-| **Phase 0** | 技術検証（PoC）：AI ハーネス・Typst PDF・Google Drive | PoC / MVP | [#1](https://github.com/sskohei/Theorem/issues/1) | 未着手 |
+| **Phase 0** | 技術検証（PoC）：AI ハーネス・Typst PDF・Google Drive | PoC / MVP | [#1](https://github.com/sskohei/Theorem/issues/1) | PoC 完了（一部外部認証保留） |
 | **Phase 1** | アプリ基盤：Tauri・React 3 カラム UI・SQLite・問題取り込みとビューア | MVP | [#2](https://github.com/sskohei/Theorem/issues/2) | 未着手 |
 | **Phase 2** | AI 機能：エージェント管理・問題認識・解答生成・チャット・PDF・バージョン管理 | MVP | [#3](https://github.com/sskohei/Theorem/issues/3) | 未着手 |
 | **Phase 3** | 数学・物理計算ツール：Science MCP Server・検証・次元解析・グラフ埋め込み | MVP | [#4](https://github.com/sskohei/Theorem/issues/4) | 未着手 |

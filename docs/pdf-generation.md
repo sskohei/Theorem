@@ -1,7 +1,7 @@
 # PDF 生成・組版設計（PDF Generation）
 
-> **ステータス**: Draft v1.0（組版実行方式と LaTeX→Typst 変換方式は Phase 0 で比較検証・確定）
-> **組版エンジン**: Typst
+> **ステータス**: v1.1（Phase 0 検証完了・Embedded Typst 0.15.1 + `mitex` + オフライン互換プレリュード採用確定：[ADR-0004](./adr/0004-typst-pdf-generation-and-latex-conversion.md)）
+> **組版エンジン**: Typst（Rust クレート組み込み: `typst` + `typst-pdf` + `typst-assets`）
 > **最終更新**: 2026-11-25
 
 ---

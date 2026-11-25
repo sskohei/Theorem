@@ -1,0 +1,42 @@
+# Rust / Cargo
+/target/
+**/target/
+**/*.rs.bk
+
+# Node / pnpm / Frontend
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.vite/
+*.local
+
+# Python / uv
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.venv/
+**/.venv/
+.pytest_cache/
+.ruff_cache/
+
+# PoC generated artifacts & temporary workspaces
+poc/**/output/
+poc/**/tmp/
+*.pdf
+!fixtures/**/*.pdf
+
+# Environment & Secrets (NEVER commit credentials)
+.env
+.env.*
+!.env.example
+*client_secret*.json
+*credentials*.json
+*token*.json
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
