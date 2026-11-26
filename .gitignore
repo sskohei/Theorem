@@ -1,7 +1,8 @@
-# Rust / Cargo
+# Rust / Cargo / Tauri generated
 /target/
 **/target/
 **/*.rs.bk
+src-tauri/gen/schemas/
 
 # Node / pnpm / Frontend
 node_modules/

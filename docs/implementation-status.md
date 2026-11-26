@@ -1,7 +1,7 @@
 # 実装・技術検証状況（Implementation Status）
 
-> **最終更新**: 2026-11-25
-> **現在フェーズ**: **Phase 0（技術検証 PoC）実行可能 PoC 実装・ローカル検証完了**（外部認証が必要な実 Google Drive OAuth および未導入の Claude Code 実機接続のみ保留として記録）
+> **最終更新**: 2026-11-26
+> **現在フェーズ**: **Phase 1（アプリ基盤 `#2`）実装・ローカル自動検証・Windows 11 起動スモーク検証完了**（Phase 2 AI 機能 `#3` 着手待ち；Phase 0 の実 Google Drive OAuth および未導入の Claude Code 実機接続は引き続き保留として記録）
 > **誠実性ルール**: 未実装機能を完成済みと記載しない。モックテスト合格と外部サービス実接続確認を明確に区別する。外部認証が必要な項目は認証情報なしで「動作確認済み」にしない。
 
 ---
@@ -23,8 +23,8 @@
 | `docs/security.md` | 作成済み (v1.0) | 脅威モデル・隔離・Tauri Capability/CSP |
 | `docs/ui-design.md` | 作成済み (v1.0) | 3 カラム画面・6 タブ・11 設定カテゴリ |
 | `docs/testing.md` | 作成済み (v1.0) | Rust/React/Python/統合テスト計画 |
-| `docs/development.md` | 作成済み (v1.0) | 環境構築・規約・フェーズ完了チェックリスト |
-| `docs/roadmap.md` | 作成済み (v1.0) | Phase 0〜6 計画・GitHub Issue (`#1`〜`#7`) 対応 |
+| `docs/development.md` | 更新済み (v1.1) | Phase 1 構成・開発コマンド・規約・チェックリスト |
+| `docs/roadmap.md` | 更新済み (v1.1) | Phase 0〜6 計画・GitHub Issue (`#1`〜`#7`) 対応 |
 | `docs/adr/` (ADR-0001〜0006) | 更新済み | **全 6 件 Accepted**（ADR-0004 を Phase 0 検証結果で確定） |
 | `poc/README.md` | 作成済み | Phase 0 実行可能 PoC の実行手順・実測レポート |
 
@@ -78,7 +78,7 @@
 | Phase | Issue | コンポーネント | 実装状態 | 自動テスト (Mock/Unit) | 実サービス接続検証 |
 |---|---|---|---|---|---|
 | Phase 0 | [#1](https://github.com/sskohei/Theorem/issues/1) | 技術検証 PoC（`poc/`） | **PoC 実装完了（一部実機保留）** | 通過（Rust 6 テスト・clippy/fmt 0 警告・PDF.js/TS 通過） | Codex / Antigravity / Typst / PDF.js 実機済；Claude Code・実 Google Drive 保留 |
-| Phase 1 | [#2](https://github.com/sskohei/Theorem/issues/2) | Tauri / React 3 カラム / SQLite / ファイル・PDF 基盤 | 未着手 | 未実行 | N/A |
+| Phase 1 | [#2](https://github.com/sskohei/Theorem/issues/2) | Tauri / React 3 カラム / SQLite / ファイル・PDF 基盤 | **実装・ローカル検証完了** | 通過（Rust 7 テスト・clippy/fmt 0 警告・Vitest 2 ファイル 9 テスト・typecheck/lint/build 通過） | Windows 11 Tauri バイナリビルド＆起動・DB/ログ初期化スモーク確認済（対話 GUI 操作は `pnpm tauri dev` で最終目視推奨） |
 | Phase 2 | [#3](https://github.com/sskohei/Theorem/issues/3) | AI アダプター / 問題認識 / 解答生成 / チャット / PDF / バージョン管理 | 未着手 | 未実行 | 未実施 |
 | Phase 3 | [#4](https://github.com/sskohei/Theorem/issues/4) | Science MCP Server / 計算・検証・グラフ / PDF 埋め込み | 未着手 | 未実行 | N/A (ローカル) |
 | Phase 4 | [#5](https://github.com/sskohei/Theorem/issues/5) | Google Drive OAuth / 永続ジョブキュー / 更新・競合検出 | 未着手 | 未実行 | 未実施 |
@@ -92,7 +92,8 @@
 1. **実 Google Drive 接続検証（保留）**: ユーザーの Google Cloud Desktop OAuth クライアント ID を用いた `poc/gdrive-poc --live` の実機確認待ち（Phase 4 本実装前までに確認推奨）。
 2. **Claude Code 実機接続検証（保留）**: ローカル未導入およびサブスクリプション OAuth のサードパーティ規約制約あり。MVP は実機全項目検証済みの **Codex App Server**（および Antigravity ACP）を先行実装する。
 3. **Antigravity ACP のキャンセル残留チャンク対策**: Phase 2 の `AgentManager` でターン ID 相関・キャンセル後ドレイン制御を実装する。
-4. **配布戦略（Phase 6）**: Windows エンドユーザー向けに Python (`uv`) / Science MCP 環境および SIL OFL 日本語フォントをどう同梱・初期化するか Phase 6 で確定する。
+4. **配布戦略・macOS 識別子確認（Phase 6）**: Windows エンドユーザー向けに Python (`uv`) / Science MCP 環境および SIL OFL 日本語フォントをどう同梱・初期化するか Phase 6 で確定する。また Tauri `identifier`（`dev.formuladesk.app`）の `.app` 接尾辞警告について macOS 正式対応前（Phase 6）に整理する。
+5. **Phase 1 対話 GUI 目視確認**: Windows 11 での Tauri バイナリビルド・起動・SQLite 初期化および Rust/Vitest 自動テストは通過済み。WebView2 上での実 PDF 描画・OS ドラッグ＆ドロップ・クリップボード貼付の対話操作は `pnpm tauri dev` にて確認推奨。
 
 ---
 

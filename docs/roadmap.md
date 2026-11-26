@@ -1,8 +1,8 @@
 # 開発ロードマップ（Roadmap）
 
-> **ステータス**: Draft v1.0
+> **ステータス**: Active v1.1
 > **対象**: Phase 0（技術検証）〜 Phase 6（OSS 正式公開）
-> **最終更新**: 2026-11-25
+> **最終更新**: 2026-11-26
 
 ---
 
@@ -30,7 +30,7 @@ flowchart LR
 | Phase | 名称 | 区分 | 目的・主要スコープ | GitHub Issue | ステータス |
 |---|---|---|---|---|---|
 | **Phase 0** | 技術検証（PoC） | PoC | AI ハーネス接続・認証/規約確認、Typst PDF・LaTeX 変換、Google Drive OAuth/更新の実行可能 PoC と技術選定確定 | [#1](https://github.com/sskohei/Theorem/issues/1) | PoC 完了（一部外部認証保留） |
-| **Phase 1** | アプリ基盤 | MVP | Tauri v2 + React 3 カラム UI、SQLite、ローカルファイル管理、科目/フォルダ、PDF.js・画像ビューア、問題インポート | [#2](https://github.com/sskohei/Theorem/issues/2) | 未着手 |
+| **Phase 1** | アプリ基盤 | MVP | Tauri v2 + React 3 カラム UI、SQLite、ローカルファイル管理、科目/フォルダ、PDF.js・画像ビューア、問題インポート | [#2](https://github.com/sskohei/Theorem/issues/2) | 実装・ローカル検証完了 |
 | **Phase 2** | AI 機能 | MVP | `AgentAdapter`・Agent Manager、Codex/Claude/Antigravity/ACP 連携、設定画面、問題認識・編集、解答生成・構造化、AI チャット・履歴・セッション、Typst PDF 生成、バージョン管理 | [#3](https://github.com/sskohei/Theorem/issues/3) | 未着手 |
 | **Phase 3** | 数学・物理計算ツール | MVP | Python (`uv`) Science MCP Server（SymPy/Pint/NumPy/Matplotlib）、安全パーサー、計算結果保存、数式検証、次元解析、グラフ生成と PDF 埋め込み | [#4](https://github.com/sskohei/Theorem/issues/4) | 未着手 |
 | **Phase 4** | Google Drive 連携 | MVP | OAuth 2.0 PKCE (`drive.file`)、接続管理、フォルダ作成、問題・解答アップロード、同一 ID 更新、状態表示、永続ジョブキュー、指数バックオフ再試行、競合検出 | [#5](https://github.com/sskohei/Theorem/issues/5) | 未着手 |

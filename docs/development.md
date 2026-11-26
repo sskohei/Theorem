@@ -1,8 +1,8 @@
 # 開発者向けガイド（Development）
 
-> **ステータス**: Draft v1.0（Phase 1 のスキャフォールディング後に実コマンドを確定・更新予定）
+> **ステータス**: Active v1.1（Phase 1 アプリ基盤構築済み）
 > **最優先開発 OS**: Windows 11（macOS / Linux は将来対応）
-> **最終更新**: 2026-11-25
+> **最終更新**: 2026-11-26
 
 ---
 
@@ -35,9 +35,11 @@
 
 ---
 
-## 2. リポジトリセットアップと想定開発コマンド
+## 2. リポジトリセットアップと開発コマンド
 
-※以下は Phase 1〜Phase 3 で各コンポーネントを構築した後の標準ワークフローである。現時点（Phase 0 着手前）では `docs/` と `prompts/mvp.md` のみが存在する。
+Phase 1（アプリ基盤）以降はルート直下に Vite + React / TypeScript フロントエンド（`src/`）および Tauri v2 / Rust コア（`src-tauri/`）を配置しています。Phase 0 の技術検証用 PoC は `poc/` に保持しています。
+
+> **Windows PowerShell の注意**: 実行ポリシー（ExecutionPolicy）により `pnpm.ps1` の実行が制限されている環境では `pnpm.cmd` を使用してください。また、Rust ツールチェーンに PATH が通っていないシェルでは `$env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"` を先に実行してください。
 
 ### 2.1 フロントエンド + Tauri アプリ起動（Phase 1〜）
 
@@ -48,10 +50,14 @@ pnpm install
 # Tauri 開発モード起動（Vite + Rust ホットリロード）
 pnpm tauri dev
 
-# フロントエンド型チェック・Lint・テスト
+# Tauri デバッグビルド（インストーラー生成なし）
+pnpm tauri build --debug --no-bundle
+
+# フロントエンド型チェック・Lint・テスト・ビルド
 pnpm typecheck
 pnpm lint
 pnpm test
+pnpm build
 ```
 
 ### 2.2 Rust バックエンド検証（Phase 1〜）
