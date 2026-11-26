@@ -196,6 +196,41 @@ pub struct PromptSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ScienceMcpSettings {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub uv_path: Option<String>,
+    #[serde(default)]
+    pub server_dir: Option<String>,
+    #[serde(default = "default_science_timeout")]
+    pub timeout_seconds: u32,
+    #[serde(default = "default_plot_format")]
+    pub default_plot_format: String,
+}
+
+fn default_science_timeout() -> u32 {
+    10
+}
+
+fn default_plot_format() -> String {
+    "svg".to_string()
+}
+
+impl Default for ScienceMcpSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            uv_path: None,
+            server_dir: None,
+            timeout_seconds: default_science_timeout(),
+            default_plot_format: default_plot_format(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub language: String,
     pub theme: String,
@@ -211,6 +246,8 @@ pub struct AppSettings {
     pub agent_assignments: AgentPurposeAssignments,
     #[serde(default)]
     pub prompts: PromptSettings,
+    #[serde(default)]
+    pub science_mcp: ScienceMcpSettings,
 }
 
 impl Default for AppSettings {
@@ -226,6 +263,7 @@ impl Default for AppSettings {
             pdf: PdfSettings::default(),
             agent_assignments: AgentPurposeAssignments::default(),
             prompts: PromptSettings::default(),
+            science_mcp: ScienceMcpSettings::default(),
         }
     }
 }
@@ -644,4 +682,104 @@ pub enum AgentEventPayload {
         #[serde(rename = "authRequired")]
         auth_required: bool,
     },
+}
+
+// ============================================================================
+// Phase 3: Science MCP Server, Tool Executions, Verifications & Artifacts
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScienceMcpToolInfo {
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScienceMcpStatus {
+    pub enabled: bool,
+    pub uv_available: bool,
+    pub uv_path: Option<String>,
+    pub uv_version: Option<String>,
+    pub server_dir: Option<String>,
+    pub server_ready: bool,
+    pub tool_count: usize,
+    pub tools: Vec<ScienceMcpToolInfo>,
+    pub security_note: String,
+    pub detail_note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolExecutionRecord {
+    pub id: String,
+    pub agent_run_id: Option<String>,
+    pub document_id: Option<String>,
+    pub solution_id: Option<String>,
+    pub server_name: String,
+    pub tool_name: String,
+    pub arguments_json: String,
+    pub result_json: Option<String>,
+    /// `"running"` | `"succeeded"` | `"failed"` | `"timeout"` | `"cancelled"`
+    pub status: String,
+    pub duration_ms: Option<i64>,
+    pub error_message: Option<String>,
+    pub created_at: String,
+    pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct VerificationResultRecord {
+    pub id: String,
+    pub solution_id: String,
+    pub tool_execution_id: Option<String>,
+    /// `"science_mcp"` | `"ai_self_check"` | `"user_check"`
+    pub source_kind: String,
+    pub target_description: String,
+    pub assumptions: Vec<String>,
+    pub method: String,
+    /// `"passed"` | `"failed"` | `"inconclusive"` | `"not_run"` | `"error"`
+    pub status: String,
+    pub detail_json: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SolutionArtifactItem {
+    pub id: String,
+    pub solution_id: String,
+    pub attachment_id: String,
+    /// `"plot"` | `"diagram"` | `"crop"` | `"table"`
+    pub artifact_type: String,
+    pub caption: Option<String>,
+    pub source_tool_execution_id: Option<String>,
+    pub sort_order: i64,
+    pub relative_path: String,
+    pub mime_type: String,
+    pub original_filename: String,
+    pub byte_size: i64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunScienceToolRequest {
+    pub document_id: String,
+    pub solution_id: Option<String>,
+    pub tool_name: String,
+    pub arguments: serde_json::Value,
+    #[serde(default)]
+    pub attach_to_solution_pdf: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunScienceToolResult {
+    pub execution: ToolExecutionRecord,
+    pub verification: Option<VerificationResultRecord>,
+    pub created_artifacts: Vec<AttachmentInfo>,
+    pub updated_solution: Option<SolutionOperationResult>,
 }

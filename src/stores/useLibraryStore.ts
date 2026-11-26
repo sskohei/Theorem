@@ -105,6 +105,13 @@ const DEFAULT_SETTINGS: AppSettings = {
     physicsCustomInstructions: "",
     modeCustomInstructions: "",
   },
+  scienceMcp: {
+    enabled: true,
+    uvPath: null,
+    serverDir: null,
+    timeoutSeconds: 10,
+    defaultPlotFormat: "svg",
+  },
 };
 
 function buildFilter(s: LibraryState): DocumentFilter {

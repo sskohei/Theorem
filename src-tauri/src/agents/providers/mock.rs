@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,9 +14,12 @@ use crate::agents::adapter::{
     SessionConfig, make_envelope,
 };
 use crate::domain::{AgentCapabilities, AgentEventPayload, AgentModelInfo, AgentStatus};
+use crate::science_mcp::{SCIENCE_MCP_SERVER_NAME, ScopedMcpServerConfig};
 
 struct MockSessionState {
     external_id: String,
+    workspace_root: PathBuf,
+    mcp_servers: Vec<ScopedMcpServerConfig>,
     cancelled: Arc<Mutex<bool>>,
     pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<PermissionDecision>>>>,
 }
@@ -97,6 +101,8 @@ impl AgentAdapter for MockAdapter {
 
         let state = Arc::new(MockSessionState {
             external_id: ext_id.clone(),
+            workspace_root: config.workspace_root,
+            mcp_servers: config.mcp_servers,
             cancelled: Arc::new(Mutex::new(false)),
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
         });
@@ -277,6 +283,248 @@ impl AgentAdapter for MockAdapter {
                         "answer": { "latex": "x = 1" }
                     })
                     .to_string()
+                } else if prompt_text.contains("[TEST_SPOOF_SCIENCE_MCP]") {
+                    // Intentionally spoof `source_kind: "science_mcp"` WITHOUT invoking any tool;
+                    // Rust core MUST downgrade this to `ai_self_check`!
+                    json!({
+                        "schema_version": 1,
+                        "subject": "mathematics",
+                        "field": "calculus",
+                        "title": "検証ソース詐称防御テスト",
+                        "mode": "verified",
+                        "steps": [
+                            { "type": "equation", "latex": "x^2 - 1 = (x-1)(x+1)", "display": true }
+                        ],
+                        "answer": { "latex": "x = \\pm 1" },
+                        "verification": [
+                            {
+                                "source_kind": "science_mcp",
+                                "target": "ツール未実行の偽装検証",
+                                "method": "AI 自己申告",
+                                "status": "passed",
+                                "note": "ツール実行なしで science_mcp を名乗るケース"
+                            }
+                        ],
+                        "artifacts": [],
+                        "warnings": []
+                    })
+                    .to_string()
+                } else if prompt_text.contains("【生成モード】verified")
+                    || prompt_text.contains("subject=physics")
+                    || prompt_text.contains("[TEST_SCIENCE_MCP]")
+                {
+                    let has_science_mcp = sess
+                        .mcp_servers
+                        .iter()
+                        .any(|s| s.name == SCIENCE_MCP_SERVER_NAME);
+
+                    let mut artifact_rel_opt: Option<String> = None;
+                    if has_science_mcp {
+                        // 1. Emit check_dimensions tool call
+                        let call_dim = format!("mock-call-dim-{}", Uuid::new_v4());
+                        let _ = tx.send(make_envelope(
+                            &run_id,
+                            &sess_id_owned,
+                            message_id.as_deref(),
+                            AgentEventPayload::ToolCallStarted {
+                                call_id: call_dim.clone(),
+                                server: Some(SCIENCE_MCP_SERVER_NAME.to_string()),
+                                tool_name: "check_dimensions".to_string(),
+                                arguments: json!({
+                                    "lhs_expression": "m * a",
+                                    "rhs_expression": "k * x",
+                                    "unit_map": { "m": "kg", "a": "m/s**2", "k": "N/m", "x": "m" }
+                                }),
+                            },
+                        ));
+                        let _ = tx.send(make_envelope(
+                            &run_id,
+                            &sess_id_owned,
+                            message_id.as_deref(),
+                            AgentEventPayload::ToolCallUpdated {
+                                call_id: call_dim.clone(),
+                                status: "running".to_string(),
+                                progress: Some("Pint 次元解析を実行中".to_string()),
+                            },
+                        ));
+                        let _ = tx.send(make_envelope(
+                            &run_id,
+                            &sess_id_owned,
+                            message_id.as_deref(),
+                            AgentEventPayload::ToolCallCompleted {
+                                call_id: call_dim,
+                                succeeded: true,
+                                output: json!({
+                                    "ok": true,
+                                    "tool": "check_dimensions",
+                                    "result": {
+                                        "consistent": true,
+                                        "status": "passed",
+                                        "lhs_dimension": "[M][L][T]^-2",
+                                        "rhs_dimension": "[M][L][T]^-2"
+                                    },
+                                    "verification": {
+                                        "status": "passed",
+                                        "target": "運動方程式の次元整合性: m * a = k * x",
+                                        "assumptions": ["[m] = kg", "[a] = m/s**2", "[k] = N/m", "[x] = m"],
+                                        "method": "pint.dimensionality 一致検証"
+                                    },
+                                    "artifacts": [],
+                                    "warnings": [],
+                                    "duration_ms": 18
+                                }),
+                            },
+                        ));
+
+                        // 2. Emit plot_function tool call and write real vector SVG into workspace artifacts/
+                        let plot_filename = format!("{}.svg", Uuid::new_v4());
+                        let plot_rel = format!("artifacts/{plot_filename}");
+                        let artifacts_dir = sess.workspace_root.join("artifacts");
+                        let _ = std::fs::create_dir_all(&artifacts_dir);
+                        let svg_content = mock_damped_oscillation_svg();
+                        if std::fs::write(
+                            artifacts_dir.join(&plot_filename),
+                            svg_content.as_bytes(),
+                        )
+                        .is_ok()
+                        {
+                            artifact_rel_opt = Some(plot_rel.clone());
+                            let call_plot = format!("mock-call-plot-{}", Uuid::new_v4());
+                            let _ = tx.send(make_envelope(
+                                &run_id,
+                                &sess_id_owned,
+                                message_id.as_deref(),
+                                AgentEventPayload::ToolCallStarted {
+                                    call_id: call_plot.clone(),
+                                    server: Some(SCIENCE_MCP_SERVER_NAME.to_string()),
+                                    tool_name: "plot_function".to_string(),
+                                    arguments: json!({
+                                        "expressions": ["exp(-t)*(cos(2*t) + sin(2*t)/2)"],
+                                        "variable": "t",
+                                        "x_range": [0, 6],
+                                        "output_format": "svg"
+                                    }),
+                                },
+                            ));
+                            let _ = tx.send(make_envelope(
+                                &run_id,
+                                &sess_id_owned,
+                                message_id.as_deref(),
+                                AgentEventPayload::ToolCallCompleted {
+                                    call_id: call_plot,
+                                    succeeded: true,
+                                    output: json!({
+                                        "ok": true,
+                                        "tool": "plot_function",
+                                        "result": {
+                                            "variable": "t",
+                                            "x_range": [0, 6],
+                                            "artifact_path": plot_rel,
+                                            "format": "svg"
+                                        },
+                                        "verification": {
+                                            "status": "passed",
+                                            "target": "減衰振動の関数グラフ生成 (SVG)",
+                                            "assumptions": ["t in [0, 6]"],
+                                            "method": "Matplotlib Agg 非対話描画"
+                                        },
+                                        "artifacts": [
+                                            {
+                                                "relative_path": plot_rel,
+                                                "filename": plot_filename,
+                                                "mime_type": "image/svg+xml",
+                                                "format": "svg",
+                                                "caption": "減衰振動の変位 x(t) グラフ"
+                                            }
+                                        ],
+                                        "warnings": [],
+                                        "duration_ms": 45
+                                    }),
+                                },
+                            ));
+                            let _ = tx.send(make_envelope(
+                                &run_id,
+                                &sess_id_owned,
+                                message_id.as_deref(),
+                                AgentEventPayload::ArtifactCreated {
+                                    relative_path: plot_rel,
+                                    mime_type: "image/svg+xml".to_string(),
+                                    caption: Some("減衰振動の変位 x(t) グラフ".to_string()),
+                                },
+                            ));
+                        }
+                    }
+
+                    let artifacts_val = match artifact_rel_opt {
+                        Some(rel) => json!([
+                            {
+                                "relative_path": rel,
+                                "caption": "減衰振動の変位 x(t) グラフ",
+                                "artifact_type": "plot"
+                            }
+                        ]),
+                        None => json!([]),
+                    };
+
+                    json!({
+                        "schema_version": 1,
+                        "subject": "physics",
+                        "field": "classical_mechanics",
+                        "title": "減衰調和振動子の運動方程式と応答グラフ",
+                        "mode": "verified",
+                        "assumptions": ["質量 m > 0、減衰係数・ばね定数は正の定数とする"],
+                        "coordinate_system": "つり合い位置を原点とし変位 x(t) を正方向にとる",
+                        "given_quantities": [
+                            { "symbol": "m", "description": "物体の質量", "unit": "kg" },
+                            { "symbol": "k", "description": "ばね定数", "unit": "N/m" },
+                            { "symbol": "t", "description": "時刻", "unit": "s" }
+                        ],
+                        "principles": ["ニュートンの運動方程式", "線形定数係数 2 階常微分方程式"],
+                        "steps": [
+                            {
+                                "type": "explanation",
+                                "heading": "1. 運動方程式の立式",
+                                "text": "減衰項を含む運動方程式を整理する。"
+                            },
+                            {
+                                "type": "equation",
+                                "latex": "\\frac{d^2 x}{dt^2} + 2 \\frac{dx}{dt} + 5 x = 0",
+                                "display": true
+                            },
+                            {
+                                "type": "explanation",
+                                "heading": "2. 初期条件 x(0) = 1, x'(0) = 0 の適用",
+                                "text": "特性方程式 r^2 + 2r + 5 = 0 の根 r = -1 \\pm 2i より一般解を得て初期条件を代入する。"
+                            },
+                            {
+                                "type": "equation",
+                                "latex": "x(t) = e^{-t} \\left( \\cos(2t) + \\frac{1}{2} \\sin(2t) \\right)",
+                                "display": true
+                            }
+                        ],
+                        "answer": {
+                            "text": "初期条件を満たす減衰振動の変位は次式で与えられる。",
+                            "latex": "x(t) = e^{-t} \\left( \\cos(2t) + \\frac{1}{2} \\sin(2t) \\right)",
+                            "unit": "m"
+                        },
+                        "dimensional_check": {
+                            "note": "運動方程式の両辺は力 [M][L][T]^{-2} の次元で一致する。",
+                            "latex": "[m a] = [k x] = \\mathrm{M L T^{-2}}"
+                        },
+                        "limiting_cases": ["t \\to \\infty で x(t) \\to 0 に収束する"],
+                        "verification": [
+                            {
+                                "source_kind": "ai_self_check",
+                                "target": "初期条件 x(0)=1 の確認",
+                                "method": "t=0 代入確認",
+                                "status": "passed",
+                                "note": "e^0 (cos 0 + 0) = 1"
+                            }
+                        ],
+                        "artifacts": artifacts_val,
+                        "warnings": []
+                    })
+                    .to_string()
                 } else {
                     json!({
                         "schema_version": 1,
@@ -348,6 +596,43 @@ impl AgentAdapter for MockAdapter {
                     .to_string()
                 }
             } else {
+                if prompt_text.contains("[TEST_TOOL_CALL]") {
+                    let call_id = format!("mock-chat-tool-{}", Uuid::new_v4());
+                    let _ = tx.send(make_envelope(
+                        &run_id,
+                        &sess_id_owned,
+                        message_id.as_deref(),
+                        AgentEventPayload::ToolCallStarted {
+                            call_id: call_id.clone(),
+                            server: Some(SCIENCE_MCP_SERVER_NAME.to_string()),
+                            tool_name: "differentiate".to_string(),
+                            arguments: json!({ "expression": "x**3", "variable": "x", "order": 1 }),
+                        },
+                    ));
+                    let _ = tx.send(make_envelope(
+                        &run_id,
+                        &sess_id_owned,
+                        message_id.as_deref(),
+                        AgentEventPayload::ToolCallCompleted {
+                            call_id,
+                            succeeded: true,
+                            output: json!({
+                                "ok": true,
+                                "tool": "differentiate",
+                                "result": { "expression": "3*x**2", "latex": "3 x^{2}" },
+                                "verification": {
+                                    "status": "passed",
+                                    "target": "1 階微分 d/dx (x**3)",
+                                    "assumptions": [],
+                                    "method": "sympy.diff(expr, x, 1)"
+                                },
+                                "artifacts": [],
+                                "warnings": [],
+                                "duration_ms": 12
+                            }),
+                        },
+                    ));
+                }
                 "ご質問ありがとうございます（Mock 応答）。\n\n数式例: $\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}$\n\n極座標変換 $x = r\\cos\\theta,\\; y = r\\sin\\theta$ を使うとヤコビアン $r$ が現れるため、$r e^{-r^2}$ が初等的に積分できます。".to_string()
             };
 
@@ -457,4 +742,15 @@ impl AgentAdapter for MockAdapter {
         self.sessions.lock().await.remove(session_id);
         Ok(())
     }
+}
+
+fn mock_damped_oscillation_svg() -> &'static str {
+    r##"<svg xmlns="http://www.w3.org/2000/svg" width="480" height="240" viewBox="0 0 480 240">
+  <rect width="480" height="240" fill="#ffffff"/>
+  <line x1="40" y1="120" x2="460" y2="120" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="40" y1="20" x2="40" y2="220" stroke="#94a3b8" stroke-width="1"/>
+  <polyline fill="none" stroke="#2563eb" stroke-width="2.2"
+    points="40,40 75,78 110,148 145,146 180,108 215,109 250,125 285,124 320,118 355,119 390,120 440,120"/>
+  <text x="240" y="22" font-size="12" text-anchor="middle" fill="#1e293b">x(t) = exp(-t)(cos 2t + 0.5 sin 2t)</text>
+</svg>"##
 }

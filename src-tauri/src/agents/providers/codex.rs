@@ -16,6 +16,9 @@ use crate::agents::adapter::{
 use crate::agents::jsonrpc::{IncomingEvent, JsonRpcProcess};
 use crate::agents::sandbox::{probe_cli_version, resolve_cli_binary};
 use crate::domain::{AgentCapabilities, AgentEventPayload, AgentModelInfo, AgentStatus};
+use crate::science_mcp::{
+    SCIENCE_MCP_SERVER_NAME, ScopedMcpServerConfig, extract_mcp_tool_envelope,
+};
 
 struct CodexLiveSession {
     process: Arc<Mutex<Option<JsonRpcProcess>>>,
@@ -59,6 +62,44 @@ impl CodexAdapter {
     fn spawn_args(&self) -> Vec<String> {
         let mut args = vec!["app-server".to_string(), "--stdio".to_string()];
         args.extend(self.extra_args.iter().cloned());
+        args
+    }
+
+    /// Appends session-scoped MCP server overrides via `-c` flags ONLY for this child process.
+    /// Guarantees `~/.codex/config.toml` is NEVER modified.
+    fn spawn_args_with_mcp(&self, mcp_servers: &[ScopedMcpServerConfig]) -> Vec<String> {
+        let mut args = self.spawn_args();
+        for srv in mcp_servers {
+            let safe_name: String = srv
+                .name
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if safe_name.is_empty() {
+                continue;
+            }
+            let cmd_norm = srv.command.replace('\\', "/");
+            let cmd_lit = serde_json::to_string(&cmd_norm).unwrap_or_else(|_| "\"\"".to_string());
+            args.push("-c".to_string());
+            args.push(format!("mcp_servers.{safe_name}.command={cmd_lit}"));
+
+            let norm_args: Vec<String> = srv.args.iter().map(|a| a.replace('\\', "/")).collect();
+            let args_lit = serde_json::to_string(&norm_args).unwrap_or_else(|_| "[]".to_string());
+            args.push("-c".to_string());
+            args.push(format!("mcp_servers.{safe_name}.args={args_lit}"));
+
+            for (k, v) in &srv.env {
+                let env_key_ok = k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                if !env_key_ok || k.is_empty() {
+                    continue;
+                }
+                let val_norm = v.replace('\\', "/");
+                let val_lit =
+                    serde_json::to_string(&val_norm).unwrap_or_else(|_| "\"\"".to_string());
+                args.push("-c".to_string());
+                args.push(format!("mcp_servers.{safe_name}.env.{k}={val_lit}"));
+            }
+        }
         args
     }
 
@@ -222,7 +263,7 @@ impl AgentAdapter for CodexAdapter {
     async fn create_session(&self, config: SessionConfig) -> Result<AgentSession, AgentError> {
         let binary = resolve_cli_binary(self.manual_path.as_deref(), "codex")
             .ok_or_else(|| AgentError::NotInstalled("codex".into()))?;
-        let args = self.spawn_args();
+        let args = self.spawn_args_with_mcp(&config.mcp_servers);
         let proc = Self::initialize_process(
             &binary,
             &args,
@@ -438,6 +479,144 @@ impl AgentAdapter for CodexAdapter {
                                     },
                                 ));
                             }
+                        } else if method == "item/started" {
+                            if let Some(item) = params.get("item")
+                                && is_codex_mcp_item(item)
+                            {
+                                let call_id = item
+                                    .get("id")
+                                    .and_then(Value::as_str)
+                                    .map(ToString::to_string)
+                                    .unwrap_or_else(|| Uuid::new_v4().to_string());
+                                let server = item
+                                    .get("server")
+                                    .and_then(Value::as_str)
+                                    .map(ToString::to_string);
+                                let tool_name = item
+                                    .get("tool")
+                                    .or_else(|| item.get("name"))
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("unknown_tool")
+                                    .to_string();
+                                let arguments =
+                                    item.get("arguments").cloned().unwrap_or_else(|| json!({}));
+                                let _ = tx.send(make_envelope(
+                                    &run_id,
+                                    &sess_id_owned,
+                                    message_id.as_deref(),
+                                    AgentEventPayload::ToolCallStarted {
+                                        call_id,
+                                        server,
+                                        tool_name,
+                                        arguments,
+                                    },
+                                ));
+                            }
+                        } else if method == "item/mcpToolCall/progress" {
+                            let call_id = params
+                                .get("itemId")
+                                .or_else(|| params.get("id"))
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                                .to_string();
+                            let progress = params
+                                .get("message")
+                                .or_else(|| params.get("progress"))
+                                .and_then(Value::as_str)
+                                .map(ToString::to_string);
+                            if !call_id.is_empty() {
+                                let _ = tx.send(make_envelope(
+                                    &run_id,
+                                    &sess_id_owned,
+                                    message_id.as_deref(),
+                                    AgentEventPayload::ToolCallUpdated {
+                                        call_id,
+                                        status: "running".to_string(),
+                                        progress,
+                                    },
+                                ));
+                            }
+                        } else if method == "item/completed" {
+                            if let Some(item) = params.get("item")
+                                && is_codex_mcp_item(item)
+                            {
+                                let call_id = item
+                                    .get("id")
+                                    .and_then(Value::as_str)
+                                    .map(ToString::to_string)
+                                    .unwrap_or_else(|| Uuid::new_v4().to_string());
+                                let status_str = item
+                                    .get("status")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("completed");
+                                let result_val = item.get("result").filter(|v| !v.is_null());
+                                let error_val = item.get("error").filter(|v| !v.is_null());
+                                let normalized = if let Some(res_v) = result_val {
+                                    extract_mcp_tool_envelope(res_v)
+                                } else if let Some(err_v) = error_val {
+                                    let msg = err_v
+                                        .get("message")
+                                        .and_then(Value::as_str)
+                                        .map(ToString::to_string)
+                                        .unwrap_or_else(|| err_v.to_string());
+                                    json!({
+                                        "ok": false,
+                                        "error": {
+                                            "code": "MCP_CALL_ERROR",
+                                            "message": msg
+                                        }
+                                    })
+                                } else {
+                                    json!({})
+                                };
+                                let succeeded = status_str != "failed"
+                                    && error_val.is_none()
+                                    && normalized
+                                        .get("ok")
+                                        .and_then(Value::as_bool)
+                                        .unwrap_or(true);
+
+                                let _ = tx.send(make_envelope(
+                                    &run_id,
+                                    &sess_id_owned,
+                                    message_id.as_deref(),
+                                    AgentEventPayload::ToolCallCompleted {
+                                        call_id,
+                                        succeeded,
+                                        output: normalized.clone(),
+                                    },
+                                ));
+
+                                if let Some(arts) =
+                                    normalized.get("artifacts").and_then(Value::as_array)
+                                {
+                                    for art in arts {
+                                        if let Some(rel) =
+                                            art.get("relative_path").and_then(Value::as_str)
+                                        {
+                                            let mime = art
+                                                .get("mime_type")
+                                                .and_then(Value::as_str)
+                                                .unwrap_or("image/svg+xml")
+                                                .to_string();
+                                            let caption = art
+                                                .get("caption")
+                                                .and_then(Value::as_str)
+                                                .map(ToString::to_string);
+                                            let _ = tx.send(make_envelope(
+                                                &run_id,
+                                                &sess_id_owned,
+                                                message_id.as_deref(),
+                                                AgentEventPayload::ArtifactCreated {
+                                                    relative_path: rel.to_string(),
+                                                    mime_type: mime,
+                                                    caption,
+                                                },
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
                         } else if method == "thread/tokenUsage/updated" {
                             let input_t = params
                                 .pointer("/tokenUsage/last/inputTokens")
@@ -512,7 +691,44 @@ impl AgentAdapter for CodexAdapter {
                         }
                     }
                     Ok(Some(IncomingEvent::ServerRequest { id, method, params })) => {
-                        if method.contains("Approval") || method.contains("requestApproval") {
+                        if method == "mcpServer/elicitation/request" {
+                            // Accept non-URL elicitation ONLY for our sandboxed local `science_mcp` server;
+                            // strictly decline any unknown server or URL redirect elicitation.
+                            let server_name = params
+                                .get("serverName")
+                                .and_then(Value::as_str)
+                                .unwrap_or("");
+                            let mode = params.get("mode").and_then(Value::as_str).unwrap_or("");
+                            if server_name == SCIENCE_MCP_SERVER_NAME && mode != "url" {
+                                let _ = client
+                                    .send_server_response(
+                                        id,
+                                        json!({ "action": "accept", "content": {} }),
+                                    )
+                                    .await;
+                            } else {
+                                let _ = client
+                                    .send_server_response(id, json!({ "action": "decline" }))
+                                    .await;
+                            }
+                        } else if method.contains("Approval") || method.contains("requestApproval")
+                        {
+                            // Allow explicitly registered sandboxed `science_mcp` math/physics tool calls
+                            // while strictly denying arbitrary shell/file writes by default.
+                            let is_registered_science_mcp = method.contains("mcpToolCall")
+                                && params
+                                    .get("server")
+                                    .or_else(|| params.pointer("/item/server"))
+                                    .and_then(Value::as_str)
+                                    .is_some_and(|s| s == SCIENCE_MCP_SERVER_NAME);
+
+                            if is_registered_science_mcp {
+                                let _ = client
+                                    .send_server_response(id, json!({ "decision": "accept" }))
+                                    .await;
+                                continue;
+                            }
+
                             let req_id = Uuid::new_v4().to_string();
                             let detail = params
                                 .get("command")
@@ -650,6 +866,13 @@ impl AgentAdapter for CodexAdapter {
         }
         Ok(())
     }
+}
+
+fn is_codex_mcp_item(item: &Value) -> bool {
+    matches!(
+        item.get("type").and_then(Value::as_str),
+        Some("mcpToolCall" | "mcp_tool_call")
+    )
 }
 
 fn is_rate_limit_text(msg: &str) -> bool {

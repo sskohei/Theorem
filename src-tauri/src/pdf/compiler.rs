@@ -218,13 +218,22 @@ pub struct CompilePdfMetadata<'a> {
     pub generated_at: &'a str,
 }
 
+#[derive(Debug, Clone)]
+pub struct PdfArtifactInput {
+    pub relative_path: String,
+    pub virtual_path: String,
+    pub caption: Option<String>,
+    pub artifact_type: String,
+    pub bytes: Vec<u8>,
+}
+
 /// Converts a Schema v1 validated JSON solution into verified Typst markup and compiles it to PDF
 /// inside a sandboxed offline world with a hard timeout.
 pub async fn compile_solution_to_pdf(
     solution_json: &Value,
     pdf_settings: &PdfSettings,
     meta: &CompilePdfMetadata<'_>,
-    virtual_artifacts: HashMap<String, Vec<u8>>,
+    artifacts: Vec<PdfArtifactInput>,
 ) -> Result<CompiledSolutionPdf, PdfCompileFailure> {
     let json_owned = solution_json.clone();
     let settings_owned = pdf_settings.clone();
@@ -237,6 +246,11 @@ pub async fn compile_solution_to_pdf(
 
     let task = tokio::task::spawn_blocking(move || {
         let fonts = cached_fonts();
+        let mut virtual_artifacts: HashMap<String, Vec<u8>> = HashMap::new();
+        for art in &artifacts {
+            virtual_artifacts.insert(art.virtual_path.clone(), art.bytes.clone());
+        }
+
         let typst_source = render_solution_typst(
             &json_owned,
             &settings_owned,
@@ -248,6 +262,7 @@ pub async fn compile_solution_to_pdf(
                 model_name: model_name.as_deref(),
                 generated_at: &generated_at,
             },
+            &artifacts,
             fonts,
         )?;
 
@@ -292,6 +307,7 @@ fn render_solution_typst(
     sol: &Value,
     settings: &PdfSettings,
     meta: &CompilePdfMetadata<'_>,
+    artifacts: &[PdfArtifactInput],
     fonts: &[Font],
 ) -> Result<String, PdfCompileFailure> {
     let mut latex_errors: Vec<LatexConversionError> = Vec::new();
@@ -665,6 +681,25 @@ fn render_solution_typst(
         out.push('\n');
     }
 
+    // Figures & Science MCP Plots (strictly sandboxed virtual paths, SVG preferred / 300 DPI PNG)
+    if !artifacts.is_empty() {
+        out.push_str("== 図・グラフ\n");
+        for (idx, art) in artifacts.iter().enumerate() {
+            let cap_text = art
+                .caption
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(ToString::to_string)
+                .unwrap_or_else(|| format!("図 {}", idx + 1));
+            out.push_str(&format!(
+                "#figure(\n  image(\"{}\", width: 85%),\n  caption: [{}],\n)\n#v(6pt)\n",
+                escape_typst_string_literal(&art.virtual_path),
+                escape_typst_text(&cap_text),
+            ));
+        }
+    }
+
     // Verification Results (strictly distinguishing science_mcp vs ai_self_check)
     if let Some(verifs) = sol.get("verification").and_then(Value::as_array)
         && !verifs.is_empty()
@@ -677,21 +712,31 @@ fn render_solution_typst(
                 _ => "AI 自己チェック（ツール未検証）",
             };
             let target = v.get("target").and_then(Value::as_str).unwrap_or("");
-            let status = v.get("status").and_then(Value::as_str).unwrap_or("not_run");
+            let method = v.get("method").and_then(Value::as_str).unwrap_or("");
+            let status_raw = v.get("status").and_then(Value::as_str).unwrap_or("not_run");
+            let status_lbl = match status_raw {
+                "passed" => "合格 (passed)",
+                "failed" => "不一致検出 (failed)",
+                "inconclusive" => "判定不能 (inconclusive)",
+                "error" => "エラー (error)",
+                _ => "未実行 (not_run)",
+            };
             let note = v.get("note").and_then(Value::as_str).unwrap_or("");
             out.push_str(&format!(
-                "- *[{} / {}]* {} {}\n",
+                "- *[{} / {}]* {}",
                 escape_typst_text(src),
-                escape_typst_text(status),
+                escape_typst_text(status_lbl),
                 escape_typst_text(target),
-                if note.is_empty() {
-                    String::new()
-                } else {
-                    format!("— {}", escape_typst_text(note))
-                }
             ));
+            if !method.trim().is_empty() {
+                out.push_str(&format!("（手法: {}）", escape_typst_text(method.trim())));
+            }
+            if !note.trim().is_empty() {
+                out.push_str(&format!(" — {}", escape_typst_text(note.trim())));
+            }
+            out.push('\n');
         }
-        out.push('\n');
+        out.push_str("#v(3pt)\n#text(size: 8pt, fill: luma(110))[※ 計算ツールによる合格（passed）は指定された式変形・数値・次元等の局所的整合性を確認したものであり、数学的証明全体や物理モデルの妥当性を保証するものではありません。]\n\n");
     }
 
     let warnings = str_array(sol.get("warnings"));
@@ -773,7 +818,7 @@ mod tests {
                 model_name: Some("mock-model"),
                 generated_at: "2026-11-26T00:00:00Z",
             },
-            HashMap::new(),
+            Vec::new(),
         )
         .await
         .expect("PDF must compile cleanly");
@@ -807,7 +852,7 @@ mod tests {
                 model_name: None,
                 generated_at: "2026-11-26T00:00:00Z",
             },
-            HashMap::new(),
+            Vec::new(),
         )
         .await;
 
@@ -819,6 +864,79 @@ mod tests {
             }
             other => panic!("expected strict Latex conversion error, got: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_compile_embeds_svg_plot_artifact_and_verification_disclaimer() {
+        let sol = json!({
+            "schema_version": 1,
+            "subject": "physics",
+            "field": "classical_mechanics",
+            "title": "減衰振動の解析",
+            "mode": "verified",
+            "steps": [
+                { "type": "equation", "latex": "x(t) = e^{-t} \\cos(2t)", "display": true }
+            ],
+            "answer": { "latex": "x(t) = e^{-t} \\cos(2t)", "unit": "m" },
+            "verification": [
+                {
+                    "source_kind": "science_mcp",
+                    "target": "運動方程式の次元整合性",
+                    "method": "pint.dimensionality",
+                    "status": "passed",
+                    "note": "[M][L][T]^-2"
+                }
+            ],
+            "artifacts": [
+                {
+                    "relative_path": "attachments/plots/plot-1.svg",
+                    "caption": "減衰振動グラフ #read(\"evil\")",
+                    "artifact_type": "plot"
+                }
+            ],
+            "warnings": []
+        });
+
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="200" height="100" fill="#fff"/><line x1="10" y1="50" x2="190" y2="50" stroke="#2563eb" stroke-width="2"/></svg>"##;
+        let compiled = compile_solution_to_pdf(
+            &sol,
+            &PdfSettings::default(),
+            &CompilePdfMetadata {
+                document_title: "力学演習",
+                problem_label: Some("第1問"),
+                problem_statement: None,
+                version_number: 1,
+                model_name: Some("mock"),
+                generated_at: "2026-11-26T00:00:00Z",
+            },
+            vec![PdfArtifactInput {
+                relative_path: "attachments/plots/plot-1.svg".to_string(),
+                virtual_path: "artifacts/fig_0.svg".to_string(),
+                caption: Some("減衰振動グラフ #read(\"evil\")".to_string()),
+                artifact_type: "plot".to_string(),
+                bytes: svg.to_vec(),
+            }],
+        )
+        .await
+        .expect("SVG artifact PDF compile must succeed");
+
+        assert!(compiled.pdf_bytes.starts_with(b"%PDF-"));
+        assert!(
+            compiled
+                .typst_source
+                .contains("image(\"artifacts/fig_0.svg\"")
+        );
+        assert!(compiled.typst_source.contains(r"\#read"));
+        assert!(
+            compiled
+                .typst_source
+                .contains("計算ツール検証 (Science MCP)")
+        );
+        assert!(
+            compiled
+                .typst_source
+                .contains("数学的証明全体や物理モデルの妥当性を保証するものではありません")
+        );
     }
 
     #[test]

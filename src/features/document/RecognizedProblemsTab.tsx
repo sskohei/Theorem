@@ -300,8 +300,10 @@ export function RecognizedProblemsTab({ onTriggerRecognize }: RecognizedProblems
             className="h-7 rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-800"
           >
             <option value="standard">標準 (standard)</option>
+            <option value="concise">簡潔 (concise)</option>
             <option value="detailed">詳細解説 (detailed)</option>
             <option value="rigorous">厳密証明 (rigorous)</option>
+            <option value="verified">計算検証付き (verified / Science MCP)</option>
             <option value="hint">ヒント (hint)</option>
           </select>
 

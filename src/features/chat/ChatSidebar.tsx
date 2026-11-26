@@ -1,8 +1,13 @@
 import { useMemo, useRef, useState } from "react";
 import {
+  Calculator,
   Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Copy,
   ImagePlus,
+  Loader2,
   MessageSquare,
   Plus,
   RefreshCw,
@@ -11,6 +16,7 @@ import {
   Square,
   Trash2,
   X,
+  XCircle,
 } from "lucide-react";
 import { MarkdownMath } from "@/components/MarkdownMath";
 import { Badge } from "@/components/ui/Badge";
@@ -36,6 +42,7 @@ export function ChatSidebar() {
     includeSolutionContext,
     sending,
     streamingText,
+    liveToolCalls,
     pendingPermissions,
     error,
     selectConversation,
@@ -54,6 +61,7 @@ export function ChatSidebar() {
   const [inputText, setInputText] = useState("");
   const [attachedImages, setAttachedImages] = useState<ChatImageUpload[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [expandedToolIds, setExpandedToolIds] = useState<Record<string, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const activeProfile = useMemo(() => {
@@ -362,6 +370,80 @@ export function ChatSidebar() {
               </div>
             );
           })
+        )}
+
+        {/* Live / Recent Tool Execution Status Cards (Science MCP) */}
+        {liveToolCalls.length > 0 && (
+          <div
+            aria-label="ツール実行状況"
+            className="space-y-1.5 rounded-lg border border-blue-200 bg-blue-50/50 p-2 text-[11px] dark:border-blue-900/70 dark:bg-blue-950/30"
+          >
+            <div className="flex items-center gap-1 font-semibold text-blue-900 dark:text-blue-200">
+              <Calculator className="h-3.5 w-3.5" />
+              <span>計算ツール実行状況 ({liveToolCalls.length})</span>
+            </div>
+            {liveToolCalls.map((tc) => {
+              const open = Boolean(expandedToolIds[tc.callId]);
+              return (
+                <div
+                  key={tc.callId}
+                  className="rounded border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedToolIds((prev) => ({ ...prev, [tc.callId]: !prev[tc.callId] }))
+                    }
+                    className="flex w-full items-center justify-between gap-1.5 px-2 py-1.5 text-left"
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {open ? (
+                        <ChevronDown className="h-3 w-3 shrink-0 text-slate-400" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3 shrink-0 text-slate-400" />
+                      )}
+                      {tc.status === "running" ? (
+                        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-blue-600" />
+                      ) : tc.status === "succeeded" ? (
+                        <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-600" />
+                      ) : (
+                        <XCircle className="h-3 w-3 shrink-0 text-red-600" />
+                      )}
+                      <code className="truncate font-mono font-semibold text-slate-800 dark:text-slate-100">
+                        {tc.toolName}
+                      </code>
+                    </div>
+                    <Badge variant={tc.status === "failed" ? "warning" : "info"} className="text-[9px]">
+                      {tc.status === "running"
+                        ? "実行中"
+                        : tc.status === "succeeded"
+                          ? "完了"
+                          : "失敗"}
+                    </Badge>
+                  </button>
+                  {tc.progress && tc.status === "running" && (
+                    <div className="px-2 pb-1 text-[10px] text-slate-500">{tc.progress}</div>
+                  )}
+                  {open && (
+                    <div className="space-y-1 border-t border-slate-100 p-2 text-[10px] dark:border-slate-800">
+                      <div className="font-semibold text-slate-500">引数</div>
+                      <pre className="max-h-24 overflow-auto rounded bg-slate-100 p-1 font-mono dark:bg-slate-950">
+                        {JSON.stringify(tc.arguments, null, 2)}
+                      </pre>
+                      {tc.output !== null && (
+                        <>
+                          <div className="font-semibold text-slate-500">出力</div>
+                          <pre className="max-h-32 overflow-auto rounded bg-slate-100 p-1 font-mono dark:bg-slate-950">
+                            {JSON.stringify(tc.output, null, 2)}
+                          </pre>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
 
         {/* Active Streaming Message Bubble */}

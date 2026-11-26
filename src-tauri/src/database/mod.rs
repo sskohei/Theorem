@@ -1,5 +1,6 @@
 pub mod ai_repo;
 pub mod library_repo;
+pub mod science_repo;
 
 use std::path::Path;
 use std::str::FromStr;
@@ -41,6 +42,7 @@ impl Database {
         db.seed_default_subjects_if_empty().await?;
         ai_repo::seed_default_agent_profiles_if_empty(&db.pool).await?;
         ai_repo::recover_interrupted_state(&db.pool).await?;
+        science_repo::recover_interrupted_tool_executions(&db.pool).await?;
         Ok(db)
     }
 

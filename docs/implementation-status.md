@@ -1,7 +1,7 @@
 # 実装・技術検証状況（Implementation Status）
 
 > **最終更新**: 2026-11-26
-> **現在フェーズ**: **Phase 2（AI 機能統合 `#3`）・アプリ名 `Theorem` 改称 実装・ローカル自動検証・実機 OpenAI Codex E2E 検証・Windows 11 起動スモーク検証完了**（Phase 3 Science MCP Server `#4` 着手可能；未導入の Claude Code 実機接続および Phase 0/4 の実 Google Drive OAuth は引き続き保留として記録）
+> **現在フェーズ**: **Phase 3（Science MCP Server `#4`）実装・ローカル自動検証（Python / Rust / React）・実機 OpenAI Codex + Science MCP E2E 検証・Windows 11 デバッグビルド検証完了**（Phase 4 Google Drive 連携 `#5` 着手可能；未導入の Claude Code 実機接続および Phase 0/4 の実 Google Drive OAuth は引き続き保留として記録）
 > **誠実性ルール**: 未実装機能を完成済みと記載しない。モックテスト合格と外部サービス実接続確認を明確に区別する。外部認証が必要な項目は認証情報なしで「動作確認済み」にしない。
 
 ---
@@ -10,21 +10,21 @@
 
 | ドキュメント | 状態 | 備考 |
 |---|---|---|
-| `README.md` / `AGENTS.md` | 更新済み | アプリ名 `Theorem` 改称および Phase 2 完了を反映 |
+| `README.md` / `AGENTS.md` | 更新済み | アプリ名 `Theorem` 改称および Phase 3 完了を反映 |
 | `docs/product-specification.md` | 作成済み (v1.0) | 製品全体仕様・MVP 条件 |
 | `docs/requirements.md` | 作成済み (v1.0) | 機能・非機能要件・禁止事項 |
 | `docs/architecture.md` | 作成済み (v1.0) | 全体構成・参考 OSS 調査・ストレージ設計 |
 | `docs/database.md` | 作成済み (v1.0) | 全 21 テーブル・ER 図・インデックス・マイグレーション計画 |
 | `docs/agent-integration.md` | 作成済み (v1.0) | 共通 IF・イベント・Capability・プロセス管理 |
 | `docs/provider-compatibility.md` | 更新済み (Phase 0 反映) | Codex / Antigravity / Custom ACP 検証結果・Claude 制約記録 |
-| `docs/science-mcp.md` | 作成済み (v1.0) | ツール仕様・AST 安全パーサー設計 |
+| `docs/science-mcp.md` | 更新済み (Implemented v1.1) | 全 21 ツール仕様・AST 安全パーサー・`lambdify` 禁止・実機検証反映 |
 | `docs/pdf-generation.md` | 更新済み (v1.1) | Embedded Typst 0.15.1 + `mitex` + 互換プレリュード確定 |
 | `docs/google-drive.md` | 作成済み (v1.0) | OAuth PKCE・`drive.file`・永続ジョブキュー |
 | `docs/security.md` | 作成済み (v1.0) | 脅威モデル・隔離・Tauri Capability/CSP |
 | `docs/ui-design.md` | 作成済み (v1.0) | 3 カラム画面・6 タブ・11 設定カテゴリ |
 | `docs/testing.md` | 作成済み (v1.0) | Rust/React/Python/統合テスト計画 |
-| `docs/development.md` | 更新済み (v1.2) | Phase 2 検証手順・ライブ Codex テストコマンド・規約反映 |
-| `docs/roadmap.md` | 更新済み (v1.1) | Phase 0〜6 計画・GitHub Issue (`#1`〜`#7`) 対応 |
+| `docs/development.md` | 更新済み (v1.3) | Phase 3 Science MCP 検証手順・ライブ Codex Phase 3 テストコマンド反映 |
+| `docs/roadmap.md` | 更新済み (v1.2) | Phase 0〜6 計画・Phase 3 完了反映・GitHub Issue (`#1`〜`#7`) 対応 |
 | `docs/adr/` (ADR-0001〜0006) | 更新済み | **全 6 件 Accepted**（ADR-0004 を Phase 0 検証結果で確定） |
 | `poc/README.md` | 作成済み | Phase 0 実行可能 PoC の実行手順・実測レポート |
 | `schemas/`・`templates/` | 作成済み (Phase 2) | `recognition.v1.schema.json` / `solution.v1.schema.json`・検証済み Typst テンプレート 5 種 |
@@ -81,7 +81,7 @@
 | Phase 0 | [#1](https://github.com/sskohei/Theorem/issues/1) | 技術検証 PoC（`poc/`） | **PoC 実装完了（一部実機保留）** | 通過（Rust 6 テスト・clippy/fmt 0 警告・PDF.js/TS 通過） | Codex / Antigravity / Typst / PDF.js 実機済；Claude Code・実 Google Drive 保留 |
 | Phase 1 | [#2](https://github.com/sskohei/Theorem/issues/2) | Tauri / React 3 カラム / SQLite / ファイル・PDF 基盤 | **実装・ローカル検証完了** | 通過（Rust 7 テスト・clippy/fmt 0 警告・Vitest 2 ファイル 9 テスト・typecheck/lint/build 通過） | Windows 11 Tauri バイナリビルド＆起動・DB/ログ初期化スモーク確認済 |
 | Phase 2 | [#3](https://github.com/sskohei/Theorem/issues/3) | AI アダプター / 問題認識 / 解答生成 / チャット / PDF / バージョン管理 / `Theorem` 改称 | **実装・検証完了** | 通過（Rust `cargo test --lib` 19 テスト［MockAdapter E2E・再起動復旧・Typst/LaTeX 厳格エラー・Keychain 分離・Claude 規約防御・OpenAI strict Schema 変換］・clippy/fmt 0 警告；Vitest 3 ファイル 12 テスト・typecheck/lint/build 通過） | **OpenAI Codex 実機 E2E 通過**（`test_live_codex_full_phase2_workflow` 45.1s：認証確認→画像問題認識→Schema v1 解答生成→Typst PDF 出力→ストリーミングチャット検算）、および Windows 11 `theorem.exe` 起動・DB/ログ初期化スモーク確認済（Antigravity ACP 実機は Phase 0 済・アプリ統合 UI 対話確認は `pnpm.cmd tauri dev` 推奨、Claude Code 実機は未導入のため保留） |
-| Phase 3 | [#4](https://github.com/sskohei/Theorem/issues/4) | Science MCP Server / 計算・検証・グラフ / PDF 埋め込み | 未着手 | 未実行 | N/A (ローカル) |
+| Phase 3 | [#4](https://github.com/sskohei/Theorem/issues/4) | Science MCP Server（Python / `uv`・全 21 ツール）/ AST 安全パーサー / SQLite 検証・履歴 / グラフ PDF 埋め込み / UI「計算結果」・設定「計算ツール」 | **実装・検証完了** | 通過（Python `uv run pytest` 41 テスト・Ruff lint/format 0 警告［RCE/DoS/AST 禁止関数・タイムアウト・stdio 21 ツール・次元解析・SVG/PNG UUID 隔離］；Rust `cargo test --lib` 22 テスト［ローカル実 Science MCP 呼び出し・偽装 `science_mcp` 強制格下げ・SVG PDF 埋め込み・MiTeX `\bigl/\bigr` 互換・再起動永続化・`~/.codex/config.toml` 非改変］・clippy/fmt 0 警告；Vitest 4 ファイル 15 テスト・typecheck/lint/build 通過） | **OpenAI Codex + 実 Science MCP Server E2E 通過**（`test_live_codex_phase3_science_mcp` 89.5s：`-c mcp_servers.science_mcp...` スコープ登録・`~/.codex/config.toml` SHA-256 非改変の下で `solve_ode` / `check_dimensions` / `plot_function` / `verify_equation` の実ツール実行・AST 属性アクセス拒否＆再試行成功・SVG グラフ `solution_artifacts` 永続化・Typst PDF 埋め込み生成まで完走）、および Windows 11 Tauri デバッグビルド通過（Antigravity ACP の実機 Science MCP ツール呼び出し対話確認は `pnpm.cmd tauri dev` 推奨、Claude Code 実機は未導入のため保留） |
 | Phase 4 | [#5](https://github.com/sskohei/Theorem/issues/5) | Google Drive OAuth / 永続ジョブキュー / 更新・競合検出 | 未着手 | 未実行 | 未実施 |
 | Phase 5 | [#6](https://github.com/sskohei/Theorem/issues/6) | 部分修正・差分承認 / 答案添削 / 全文検索 / 高度物理図 | 未着手 | 未実行 | 未実施 |
 | Phase 6 | [#7](https://github.com/sskohei/Theorem/issues/7) | インストーラー / クロスプラットフォーム / CI・配布 / 日英対応 | 未着手 | 未実行 | N/A |
@@ -92,7 +92,7 @@
 
 1. **実 Google Drive 接続検証（保留）**: ユーザーの Google Cloud Desktop OAuth クライアント ID を用いた `poc/gdrive-poc --live` の実機確認待ち（Phase 4 本実装前までに確認推奨）。
 2. **Claude Code 実機接続検証（保留）**: ローカル未導入およびサブスクリプション OAuth のサードパーティ規約制約あり。`ClaudeAdapter` では `official_harness` モードを規約保護のため明示ブロック（`terms_restricted`）し、明示オプトインの `api_key_keyring` モード（`--permission-mode plan --disallowedTools Bash,Write,Edit`）を実装済み。実機確認は `claude` CLI 導入可能環境で追試予定。
-3. **Antigravity ACP / 対話 GUI 目視確認**: `AcpAdapter` にてターン開始時のキャンセル後残留チャンクドレイン制御・`agent_thought_chunk` フィルタ・権限要求ブリッジを実装済み。Windows 11 での `theorem.exe` ビルド・起動スモークおよび OpenAI Codex 実機 E2E は通過済みだが、WebView2 上での Antigravity ACP 対話チャット・PDF 領域切り出し・OS D&D の目視操作確認は `pnpm.cmd tauri dev` での最終確認を推奨。
+3. **Antigravity ACP / 対話 GUI 目視確認**: `AcpAdapter` にてターン開始時のキャンセル後残留チャンクドレイン制御・`agent_thought_chunk` フィルタ・権限要求ブリッジ・`session/new`/`session/load` への `mcpServers` スコープ注入および `tool_call` 正規化を実装済み。Windows 11 での `theorem.exe` ビルドおよび OpenAI Codex 実機 E2E（Phase 2・Phase 3 Science MCP 連携）は通過済みだが、WebView2 上での Antigravity ACP 対話チャット（Science MCP 呼び出し含む）・PDF 領域切り出し・OS D&D の目視操作確認は `pnpm.cmd tauri dev` での最終確認を推奨。
 4. **配布戦略（Phase 6）**: Windows エンドユーザー向けに Python (`uv`) / Science MCP 環境および SIL OFL 日本語フォントをどう同梱・初期化するか Phase 6 で確定する。（なお旧識別子 `dev.formuladesk.app` の `.app` 接尾辞警告は `dev.theorem.desktop` への改称により解消済み。）
 
 ---

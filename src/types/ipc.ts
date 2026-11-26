@@ -134,6 +134,14 @@ export interface PromptSettings {
   modeCustomInstructions: string;
 }
 
+export interface ScienceMcpSettings {
+  enabled: boolean;
+  uvPath: string | null;
+  serverDir: string | null;
+  timeoutSeconds: number;
+  defaultPlotFormat: "svg" | "png";
+}
+
 export interface AppSettings {
   language: string;
   theme: ThemePreference;
@@ -145,6 +153,7 @@ export interface AppSettings {
   pdf: PdfSettings;
   agentAssignments: AgentPurposeAssignments;
   prompts: PromptSettings;
+  scienceMcp: ScienceMcpSettings;
 }
 
 export interface StorageStats {
@@ -477,4 +486,89 @@ export interface AgentEventEnvelope {
   messageId: string | null;
   timestamp: string;
   event: AgentEventPayload;
+}
+
+// ============================================================================
+// Phase 3: Science MCP Server, Tool Executions, Verifications & Artifacts
+// ============================================================================
+
+export type VerificationStatus = "passed" | "failed" | "inconclusive" | "not_run" | "error";
+export type VerificationSourceKind = "science_mcp" | "ai_self_check" | "user_check";
+export type ToolExecutionStatus = "running" | "succeeded" | "failed" | "timeout" | "cancelled";
+
+export interface ScienceMcpToolInfo {
+  name: string;
+  description: string;
+}
+
+export interface ScienceMcpStatus {
+  enabled: boolean;
+  uvAvailable: boolean;
+  uvPath: string | null;
+  uvVersion: string | null;
+  serverDir: string | null;
+  serverReady: boolean;
+  toolCount: number;
+  tools: ScienceMcpToolInfo[];
+  securityNote: string;
+  detailNote: string | null;
+}
+
+export interface ToolExecutionRecord {
+  id: string;
+  agentRunId: string | null;
+  documentId: string | null;
+  solutionId: string | null;
+  serverName: string;
+  toolName: string;
+  argumentsJson: string;
+  resultJson: string | null;
+  status: ToolExecutionStatus;
+  durationMs: number | null;
+  errorMessage: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface VerificationResultRecord {
+  id: string;
+  solutionId: string;
+  toolExecutionId: string | null;
+  sourceKind: VerificationSourceKind;
+  targetDescription: string;
+  assumptions: string[];
+  method: string;
+  status: VerificationStatus;
+  detailJson: string | null;
+  createdAt: string;
+}
+
+export interface SolutionArtifactItem {
+  id: string;
+  solutionId: string;
+  attachmentId: string;
+  artifactType: "plot" | "diagram" | "crop" | "table";
+  caption: string | null;
+  sourceToolExecutionId: string | null;
+  sortOrder: number;
+  relativePath: string;
+  mimeType: string;
+  originalFilename: string;
+  byteSize: number;
+  createdAt: string;
+}
+
+export interface RunScienceToolRequest {
+  documentId: string;
+  solutionId?: string | null;
+  toolName: string;
+  arguments: Record<string, unknown>;
+  attachToSolutionPdf: boolean;
+}
+
+export interface RunScienceToolResult {
+  execution: ToolExecutionRecord;
+  verification: VerificationResultRecord | null;
+  createdArtifacts: AttachmentInfo[];
+  updatedSolution: SolutionOperationResult | null;
 }

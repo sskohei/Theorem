@@ -1,4 +1,5 @@
 pub mod ai_service;
+pub mod science_service;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1093,5 +1094,445 @@ mod tests {
             .expect("live chat");
         assert_eq!(chat.assistant_message.status, "completed");
         assert!(chat.assistant_message.content_markdown.contains('4'));
+    }
+
+    #[tokio::test]
+    async fn test_phase3_physics_verified_solution_real_science_mcp_pdf_plot_and_spoof_defense() {
+        use crate::domain::{GenerateSolutionRequest, RunScienceToolRequest, UpsertProblemRequest};
+        use crate::storage::sha256_hex;
+
+        // Snapshot user's ~/.codex/config.toml before running to guarantee zero mutation
+        let codex_cfg_path = std::env::var_os("USERPROFILE")
+            .or_else(|| std::env::var_os("HOME"))
+            .map(|h| PathBuf::from(h).join(".codex").join("config.toml"));
+        let codex_cfg_hash_before = codex_cfg_path
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok())
+            .map(|b| sha256_hex(&b));
+
+        let dir = TempDir::new().expect("tempdir");
+        let state = AppState::initialize(dir.path().to_path_buf())
+            .await
+            .expect("init");
+        let boot = state.bootstrap().await.expect("bootstrap");
+        let phys_id = boot.subjects[1].id.clone();
+
+        let profiles = state.list_agent_profiles().await.expect("profiles");
+        let mock_profile = profiles
+            .iter()
+            .find(|p| p.provider_kind == "mock")
+            .expect("mock profile")
+            .clone();
+
+        // 1. Live probe of local Python Science MCP Server (21 tools, zero generic python exec)
+        let mcp_status = state
+            .check_science_mcp_status()
+            .await
+            .expect("science mcp status");
+        assert!(
+            mcp_status.server_ready,
+            "Science MCP must be ready: {:?}",
+            mcp_status.detail_note
+        );
+        assert_eq!(mcp_status.tool_count, 21);
+        assert!(
+            !mcp_status
+                .tools
+                .iter()
+                .any(|t| t.name == "run_python" || t.name == "shell")
+        );
+
+        // Import a physics problem image & add structured physics problem
+        let imported = state
+            .import_file_bytes(
+                &phys_id,
+                None,
+                "damped_oscillation.png",
+                &STANDARD.encode(sample_png_bytes()),
+            )
+            .await
+            .expect("import physics problem");
+        let doc_id = imported.detail.document.id.clone();
+
+        let prob = state
+            .upsert_problem(&UpsertProblemRequest {
+                id: None,
+                document_id: doc_id.clone(),
+                problem_number: "第1問".to_string(),
+                subproblem_number: Some("(1)".to_string()),
+                subject_category: "physics".to_string(),
+                field: Some("classical_mechanics".to_string()),
+                statement_markdown:
+                    "減衰調和振動子 $x''(t) + 2x'(t) + 5x(t) = 0$ を $x(0)=1, x'(0)=0$ のもとで解き、運動方程式の次元整合性と変位グラフを示せ。"
+                        .to_string(),
+                given_conditions: vec!["x(0) = 1".to_string(), "x'(0) = 0".to_string()],
+                target_objective: Some("x(t) の厳密解とグラフ".to_string()),
+                source_pages: vec![1],
+                figure_refs: Vec::new(),
+                uncertainties: Vec::new(),
+                is_user_verified: true,
+            })
+            .await
+            .expect("upsert physics problem");
+
+        // 2. Security test: AI spoofing `source_kind: "science_mcp"` without executing any tool
+        // MUST be forcibly downgraded to `ai_self_check`.
+        let spoof_prob = state
+            .upsert_problem(&UpsertProblemRequest {
+                id: None,
+                document_id: doc_id.clone(),
+                problem_number: "第2問".to_string(),
+                subproblem_number: None,
+                subject_category: "mathematics".to_string(),
+                field: Some("calculus".to_string()),
+                statement_markdown: "[TEST_SPOOF_SCIENCE_MCP] 詐称防御検証".to_string(),
+                given_conditions: Vec::new(),
+                target_objective: None,
+                source_pages: vec![1],
+                figure_refs: Vec::new(),
+                uncertainties: Vec::new(),
+                is_user_verified: true,
+            })
+            .await
+            .expect("upsert spoof problem");
+
+        let spoof_sol = state
+            .generate_solution(&GenerateSolutionRequest {
+                document_id: doc_id.clone(),
+                problem_id: Some(spoof_prob.id.clone()),
+                agent_profile_id: Some(mock_profile.id.clone()),
+                model_name: Some("mock-math-pro".to_string()),
+                mode: "verified".to_string(),
+                target_scope: "single_problem".to_string(),
+                page_range_start: None,
+                page_range_end: None,
+                repair_feedback: None,
+                parent_solution_id: None,
+            })
+            .await
+            .expect("generate spoof solution");
+        let spoof_verifs = state
+            .list_solution_verifications(&spoof_sol.solution.id)
+            .await
+            .expect("spoof verifs");
+        assert!(!spoof_verifs.is_empty());
+        assert!(
+            spoof_verifs
+                .iter()
+                .all(|v| v.source_kind == "ai_self_check"),
+            "Unbacked AI science_mcp claim MUST be downgraded to ai_self_check: {spoof_verifs:?}"
+        );
+
+        // 3. Verified mode solution generation via MockAdapter emitting real MCP tool events + SVG plot
+        let verified_sol = state
+            .generate_solution(&GenerateSolutionRequest {
+                document_id: doc_id.clone(),
+                problem_id: Some(prob.id.clone()),
+                agent_profile_id: Some(mock_profile.id.clone()),
+                model_name: Some("mock-math-pro".to_string()),
+                mode: "verified".to_string(),
+                target_scope: "single_problem".to_string(),
+                page_range_start: None,
+                page_range_end: None,
+                repair_feedback: None,
+                parent_solution_id: None,
+            })
+            .await
+            .expect("generate verified physics solution");
+        assert!(verified_sol.schema_issues.is_empty());
+        assert!(verified_sol.latex_errors.is_empty());
+        assert!(verified_sol.pdf_error.is_none());
+        assert!(verified_sol.solution.pdf_attachment_id.is_some());
+
+        let v1_verifs = state
+            .list_solution_verifications(&verified_sol.solution.id)
+            .await
+            .expect("v1 verifs");
+        assert!(
+            v1_verifs
+                .iter()
+                .any(|v| v.source_kind == "science_mcp" && v.status == "passed")
+        );
+        assert!(v1_verifs.iter().any(|v| v.source_kind == "ai_self_check"));
+
+        let v1_arts = state
+            .list_solution_artifacts(&verified_sol.solution.id)
+            .await
+            .expect("v1 artifacts");
+        assert_eq!(v1_arts.len(), 1);
+        assert!(v1_arts[0].relative_path.starts_with("attachments/plots/"));
+
+        // 4. Real Python Science MCP direct execution:
+        // (a) Electromagnetism unit conversion & dimensional analysis
+        let dim_run = state
+            .run_science_tool(&RunScienceToolRequest {
+                document_id: doc_id.clone(),
+                solution_id: Some(verified_sol.solution.id.clone()),
+                tool_name: "check_dimensions".to_string(),
+                arguments: serde_json::json!({
+                    "lhs_expression": "F",
+                    "rhs_expression": "q * v * B",
+                    "unit_map": { "F": "N", "q": "C", "v": "m/s", "B": "T" }
+                }),
+                attach_to_solution_pdf: false,
+            })
+            .await
+            .expect("real check_dimensions");
+        assert_eq!(dim_run.execution.status, "succeeded");
+        assert_eq!(
+            dim_run.verification.as_ref().map(|v| v.status.as_str()),
+            Some("passed")
+        );
+
+        // (b) Real ODE solver (damped oscillator)
+        let ode_run = state
+            .run_science_tool(&RunScienceToolRequest {
+                document_id: doc_id.clone(),
+                solution_id: Some(verified_sol.solution.id.clone()),
+                tool_name: "solve_ode".to_string(),
+                arguments: serde_json::json!({
+                    "equation": "Derivative(y(t), t, 2) + 2*Derivative(y(t), t) + 5*y(t) = 0",
+                    "func_name": "y",
+                    "variable": "t",
+                    "ics": { "y(0)": "1", "y'(0)": "0" }
+                }),
+                attach_to_solution_pdf: false,
+            })
+            .await
+            .expect("real solve_ode");
+        assert_eq!(ode_run.execution.status, "succeeded");
+
+        // (c) Real Matplotlib SVG plot generation + automatic embedding into solution PDF (creates v2)
+        let plot_run = state
+            .run_science_tool(&RunScienceToolRequest {
+                document_id: doc_id.clone(),
+                solution_id: Some(verified_sol.solution.id.clone()),
+                tool_name: "plot_function".to_string(),
+                arguments: serde_json::json!({
+                    "expressions": ["exp(-t) * (cos(2*t) + sin(2*t)/2)", "exp(-t)"],
+                    "variable": "t",
+                    "x_range": [0, 6],
+                    "labels": ["x(t)", "envelope"],
+                    "title": "Damped Harmonic Oscillator",
+                    "output_format": "svg"
+                }),
+                attach_to_solution_pdf: true,
+            })
+            .await
+            .expect("real plot_function + embed");
+        assert_eq!(plot_run.execution.status, "succeeded");
+        assert_eq!(plot_run.created_artifacts.len(), 1);
+        assert!(
+            plot_run.created_artifacts[0]
+                .relative_path
+                .starts_with("attachments/plots/")
+        );
+        assert_eq!(plot_run.created_artifacts[0].mime_type, "image/svg+xml");
+
+        let updated_sol = plot_run
+            .updated_solution
+            .expect("updated solution v2 with real SVG plot");
+        assert_eq!(updated_sol.solution.version_number, 2);
+        assert!(updated_sol.pdf_error.is_none());
+        let pdf_id = updated_sol
+            .solution
+            .pdf_attachment_id
+            .clone()
+            .expect("v2 pdf");
+        let pdf_bin = state
+            .read_attachment_base64(&pdf_id)
+            .await
+            .expect("read v2 pdf");
+        let pdf_raw = STANDARD.decode(&pdf_bin.base64_data).expect("decode pdf");
+        assert!(pdf_raw.starts_with(b"%PDF-"));
+
+        // Verify Typst source contains embedded SVG figure
+        let typ_id = updated_sol
+            .solution
+            .typst_source_attachment_id
+            .clone()
+            .expect("typst source");
+        let typ_bin = state
+            .read_attachment_base64(&typ_id)
+            .await
+            .expect("read typ");
+        let typ_text =
+            String::from_utf8(STANDARD.decode(&typ_bin.base64_data).expect("decode typ"))
+                .expect("utf8");
+        assert!(typ_text.contains("image(\"artifacts/fig_"));
+
+        // 5. Restart persistence check for tool_executions, verification_results & solution_artifacts
+        drop(state);
+        let restarted = AppState::initialize(dir.path().to_path_buf())
+            .await
+            .expect("re-init");
+        let execs = restarted
+            .list_document_tool_executions(&doc_id)
+            .await
+            .expect("list execs");
+        assert!(
+            execs.len() >= 5,
+            "expected at least 5 tool executions, got {}",
+            execs.len()
+        );
+        let v2_arts = restarted
+            .list_solution_artifacts(&updated_sol.solution.id)
+            .await
+            .expect("v2 artifacts after restart");
+        assert!(!v2_arts.is_empty());
+
+        // 6. Verify user's global ~/.codex/config.toml was NEVER modified
+        let codex_cfg_hash_after = codex_cfg_path
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok())
+            .map(|b| sha256_hex(&b));
+        assert_eq!(
+            codex_cfg_hash_before, codex_cfg_hash_after,
+            "User global ~/.codex/config.toml must NEVER be mutated"
+        );
+    }
+
+    /// Live real-harness verification: OpenAI Codex + real Python Science MCP Server over `-c` scoped config,
+    /// proving real MCP tool invocation + `~/.codex/config.toml` SHA-256 non-mutation.
+    /// Run via: `cargo test --lib -- --ignored test_live_codex_phase3_science_mcp --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn test_live_codex_phase3_science_mcp() {
+        use crate::domain::{GenerateSolutionRequest, UpsertProblemRequest};
+        use crate::storage::sha256_hex;
+
+        let codex_cfg_path = std::env::var_os("USERPROFILE")
+            .or_else(|| std::env::var_os("HOME"))
+            .map(|h| PathBuf::from(h).join(".codex").join("config.toml"));
+        let hash_before = codex_cfg_path
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok())
+            .map(|b| sha256_hex(&b));
+
+        let dir = TempDir::new().expect("tempdir");
+        let state = AppState::initialize(dir.path().to_path_buf())
+            .await
+            .expect("init");
+        let boot = state.bootstrap().await.expect("bootstrap");
+        let phys_id = boot.subjects[1].id.clone();
+
+        let profiles = state.list_agent_profiles().await.expect("profiles");
+        let codex = profiles
+            .iter()
+            .find(|p| p.provider_kind == "codex")
+            .expect("codex profile")
+            .clone();
+
+        let imported = state
+            .import_file_bytes(
+                &phys_id,
+                None,
+                "live_physics.png",
+                &STANDARD.encode(sample_png_bytes()),
+            )
+            .await
+            .expect("import");
+        let doc_id = imported.detail.document.id.clone();
+
+        let prob = state
+            .upsert_problem(&UpsertProblemRequest {
+                id: None,
+                document_id: doc_id.clone(),
+                problem_number: "第1問".to_string(),
+                subproblem_number: None,
+                subject_category: "physics".to_string(),
+                field: Some("classical_mechanics".to_string()),
+                statement_markdown:
+                    "減衰調和振動 $x''(t) + 2x'(t) + 5x(t) = 0$（初期条件 $x(0)=1, x'(0)=0$）を science_mcp の `solve_ode` と `check_dimensions`（$F=ma$）および `plot_function`（$t \\in [0, 6]$）を必ず使って解き、グラフ付きで解答せよ。"
+                        .to_string(),
+                given_conditions: vec!["x(0) = 1".to_string(), "x'(0) = 0".to_string()],
+                target_objective: Some("x(t) の厳密解、次元検証、グラフ".to_string()),
+                source_pages: vec![1],
+                figure_refs: Vec::new(),
+                uncertainties: Vec::new(),
+                is_user_verified: true,
+            })
+            .await
+            .expect("upsert prob");
+
+        let res = state
+            .generate_solution(&GenerateSolutionRequest {
+                document_id: doc_id.clone(),
+                problem_id: Some(prob.id.clone()),
+                agent_profile_id: Some(codex.id.clone()),
+                model_name: None,
+                mode: "verified".to_string(),
+                target_scope: "single_problem".to_string(),
+                page_range_start: None,
+                page_range_end: None,
+                repair_feedback: None,
+                parent_solution_id: None,
+            })
+            .await
+            .expect("live codex verified solution");
+        assert!(
+            res.schema_issues.is_empty(),
+            "schema issues: {:?}",
+            res.schema_issues
+        );
+        assert!(
+            res.latex_errors.is_empty(),
+            "latex errors: {:?}",
+            res.latex_errors
+        );
+        assert!(res.pdf_error.is_none(), "pdf error: {:?}", res.pdf_error);
+
+        let execs = state
+            .list_document_tool_executions(&doc_id)
+            .await
+            .expect("execs");
+        let verifs = state
+            .list_solution_verifications(&res.solution.id)
+            .await
+            .expect("verifs");
+        let arts = state
+            .list_solution_artifacts(&res.solution.id)
+            .await
+            .expect("arts");
+        println!(
+            "[live_codex_phase3] tool_executions={} ({:?}), verifications={}, artifacts={}, pdf={:?}",
+            execs.len(),
+            execs
+                .iter()
+                .map(|e| format!("{}:{}:{}", e.server_name, e.tool_name, e.status))
+                .collect::<Vec<_>>(),
+            verifs.len(),
+            arts.len(),
+            res.solution.pdf_attachment_id
+        );
+        assert!(
+            execs
+                .iter()
+                .any(|e| e.server_name == "science_mcp" && e.status == "succeeded"),
+            "Codex must have successfully executed at least one science_mcp tool"
+        );
+        assert!(
+            verifs
+                .iter()
+                .any(|v| v.source_kind == "science_mcp" && v.status == "passed"),
+            "At least one authentic science_mcp verification must be recorded"
+        );
+        assert!(
+            !arts.is_empty(),
+            "Generated plot artifact from Codex + science_mcp must be attached to the solution"
+        );
+        assert!(
+            res.solution.pdf_attachment_id.is_some(),
+            "PDF must be generated"
+        );
+
+        let hash_after = codex_cfg_path
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok())
+            .map(|b| sha256_hex(&b));
+        assert_eq!(
+            hash_before, hash_after,
+            "~/.codex/config.toml must remain untouched"
+        );
     }
 }

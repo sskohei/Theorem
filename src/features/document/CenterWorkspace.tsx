@@ -1,12 +1,14 @@
-import { AlertTriangle, FileUp, Info, Layers, X } from "lucide-react";
+import { AlertTriangle, FileUp, Info, X } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { CalculationsTab } from "@/features/verification/CalculationsTab";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useAiWorkspaceStore } from "@/stores/useAiWorkspaceStore";
 import { useDocumentStore } from "@/stores/useDocumentStore";
 import { useLayoutStore, type CenterTab } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
+import { useScienceStore } from "@/stores/useScienceStore";
 import type { PageImagePayload } from "@/types/ipc";
 import { ImageViewer } from "./ImageViewer";
 import { PdfViewer } from "./PdfViewer";
@@ -46,13 +48,15 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
     recognize,
     clearError: clearAiError,
   } = useAiWorkspaceStore();
+  const { toolExecutions, verifications } = useScienceStore();
+  const calcBadgeCount = verifications.length + toolExecutions.length;
 
   const tabs: { id: CenterTab; label: string; count?: number; phaseBadge?: string }[] = [
     { id: "original", label: t.tabs.original },
     { id: "recognized", label: t.tabs.recognized, count: problems.length || undefined },
     { id: "solutionPdf", label: t.tabs.solutionPdf },
     { id: "solutionEditor", label: t.tabs.solutionEditor },
-    { id: "calculations", label: t.tabs.calculations, phaseBadge: "Phase 3" },
+    { id: "calculations", label: t.tabs.calculations, count: calcBadgeCount || undefined },
     { id: "versions", label: t.tabs.versions, count: solutions.length || undefined },
   ];
 
@@ -247,17 +251,7 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
         ) : activeTab === "versions" ? (
           <SolutionVersionsTab />
         ) : (
-          <div className="flex h-full flex-col items-center justify-center p-8 text-center">
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-              <Layers className="h-6 w-6" />
-            </div>
-            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              {t.viewer.phase3PlannedTitle}
-            </h2>
-            <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-              {t.viewer.phase3PlannedDesc}
-            </p>
-          </div>
+          <CalculationsTab />
         )}
       </div>
     </main>

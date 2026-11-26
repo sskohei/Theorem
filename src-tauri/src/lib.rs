@@ -7,6 +7,7 @@ pub mod domain;
 pub mod error;
 pub mod pdf;
 pub mod prompts;
+pub mod science_mcp;
 pub mod security;
 pub mod storage;
 
@@ -89,6 +90,12 @@ pub fn run() {
             commands::delete_conversation,
             commands::list_messages,
             commands::send_chat_message,
+            commands::check_science_mcp_status,
+            commands::list_document_tool_executions,
+            commands::list_solution_verifications,
+            commands::list_solution_artifacts,
+            commands::run_science_tool,
+            commands::attach_artifact_to_solution,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

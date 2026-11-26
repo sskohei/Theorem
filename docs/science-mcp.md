@@ -1,8 +1,8 @@
 # Science MCP Server 仕様書（Science MCP）
 
-> **ステータス**: Draft v1.0（Phase 3 実装対象 / Phase 0 で MCP 登録方式を検証）
-> **実装言語・環境**: Python 3.11+ / `uv` / MCP Python SDK
-> **最終更新**: 2026-11-25
+> **ステータス**: Implemented v1.1（Phase 3 実装・ローカル自動テスト・実機 Codex 連携検証済み）
+> **実装言語・環境**: Python 3.11+（`uv` + `pyproject.toml` + `uv.lock`） / MCP Python SDK v2（`mcp.server.mcpserver.MCPServer`）
+> **最終更新**: 2026-11-26
 
 ---
 
@@ -14,17 +14,18 @@ Science MCP Server は、大学数学・大学物理の記号計算、数値計�
 
 ```mermaid
 flowchart LR
-    FD["FormulaDesk<br/>(Tauri / Rust)"] <-->|"ACP / App Server / SDK"| AG["External AI Agent<br/>(Codex / Claude / Antigravity / ACP)"]
+    FD["Theorem<br/>(Tauri / Rust)"] <-->|"ACP / App Server / SDK"| AG["External AI Agent<br/>(Codex / Claude / Antigravity / ACP)"]
     AG <-->|"MCP (stdio)"| MCP["Science MCP Server<br/>(Python / uv)"]
+    FD -.->|"直接実行 (UI 計算タブ)"| MCP
     MCP --> Sym["SymPy / NumPy / SciPy"]
     MCP --> Pint["Pint"]
     MCP --> Plt["Matplotlib (SVG / PNG)"]
     Plt -->|"保存先制限"| Art["workspaces/<session>/artifacts/"]
 ```
 
-- **ACP / App Server / SDK**: FormulaDesk 本体と AI エージェント間の通信
-- **MCP**: AI エージェントと数学・物理計算ツール間の通信
-- **グローバル設定保護**: ユーザーの既存グローバル MCP 設定を無断変更せず、FormulaDesk が起動するセッション単位で安全に `science-mcp` を登録する。
+- **ACP / App Server / SDK**: Theorem 本体と AI エージェント間の通信
+- **MCP**: AI エージェント（または UI 直接実行）と数学・物理計算ツール間の通信
+- **グローバル設定保護**: ユーザーの既存グローバル MCP 設定（`~/.codex/config.toml`、`~/.claude.json` 等）を無断変更せず、Theorem が起動するセッション単位で安全に `science_mcp` を登録する。
 
 ---
 
@@ -84,7 +85,7 @@ AI エージェントが問題 PDF 内のプロンプトインジェクション
 ### 4.1 任意コード実行（RCE）の完全禁止
 
 1. **汎用 Python 実行ツールを一切提供しない**（`run_python` 等のツールは設計上禁止）。
-2. **`eval()` / `exec()` / `compile()` を使用しない**。
+2. **`eval()` / `exec()` / `compile()` および `sympy.lambdify()` を使用しない**（グラフ描画時も SymPy AST を再帰的に NumPy 配列演算へ評価する専用評価器を使用し、プロダクションコード全域で AST 静的テストにより禁止を強制する）。
 3. **SymPy `parse_expr()` の無防備な呼び出しを禁止する**:
    - SymPy の `parse_expr()` は内部的に `eval()` を用いるため、`local_dict` 指定だけでは `__import__('os').system(...)` 等の組込関数経由 RCE を防げない。
    - 対策として、専用モジュール `science_mcp/parser.py` にて **Python `ast.parse(..., mode='eval')` による厳格なホワイトリスト AST 検証**を行い、許可されたノード・演算子・関数名・シンボル名のみから直接 SymPy オブジェクト（`Symbol`, `Add`, `Mul`, `Pow`, `sin`, `cos`, `exp`, `log`, `sqrt` 等）を構築する（`parse_expr` に生文字列を直接渡さない）。
@@ -159,9 +160,10 @@ science-mcp/
 ├── src/
 │   └── science_mcp/
 │       ├── __init__.py
-│       ├── server.py           # MCP エントリポイント・ツール登録・出力先検証
+│       ├── models.py           # 共通出力エンベロープ・5 状態検証・セキュリティ上限定数
+│       ├── server.py           # MCP エントリポイント（全 21 ツール登録・stdio 配信）
 │       ├── parser.py           # AST ホワイトリストによる安全な数式パーサー
-│       ├── runner.py           # タイムアウト付きワーカープロセス実行基盤
+│       ├── runner.py           # spawn ワーカープロセス隔離＋ハードタイムアウト実行基盤
 │       └── tools/
 │           ├── algebra.py
 │           ├── calculus.py
@@ -170,12 +172,14 @@ science-mcp/
 │           ├── dimensions.py
 │           └── plotting.py
 └── tests/
-    ├── test_parser_security.py # RCE / インジェクション / DoS 防御テスト
+    ├── test_parser_security.py # RCE / インジェクション / DoS / AST 禁止関数チェック
+    ├── test_algebra.py
     ├── test_calculus.py
     ├── test_linear_algebra.py
     ├── test_dimensions.py
     ├── test_plotting.py
-    └── test_timeout.py
+    ├── test_timeout.py
+    └── test_mcp_stdio.py       # 実 stdio JSON-RPC ハンドシェイク・21 ツール登録検証
 ```
 
 ---

@@ -23,17 +23,23 @@ import type {
   RecognitionMode,
   RecognizeProblemsRequest,
   RecognizeProblemsResult,
+  RunScienceToolRequest,
+  RunScienceToolResult,
   SaveAgentProfileRequest,
   SaveSolutionEditRequest,
+  ScienceMcpStatus,
   SendChatMessageRequest,
   SendChatMessageResult,
   Solution,
+  SolutionArtifactItem,
   SolutionOperationResult,
   StorageStats,
   Subject,
   SubjectCategory,
   Tag,
+  ToolExecutionRecord,
   UpsertProblemRequest,
+  VerificationResultRecord,
 } from "@/types/ipc";
 
 export function isTauriRuntime(): boolean {
@@ -338,6 +344,34 @@ export const tauriClient = {
   },
   sendChatMessage(input: SendChatMessageRequest): Promise<SendChatMessageResult> {
     return callCommand<SendChatMessageResult>("send_chat_message", { input });
+  },
+
+  // Phase 3: Science MCP Server, Tool Executions, Verifications & Artifacts
+  checkScienceMcpStatus(): Promise<ScienceMcpStatus> {
+    return callCommand<ScienceMcpStatus>("check_science_mcp_status");
+  },
+  listDocumentToolExecutions(documentId: string): Promise<ToolExecutionRecord[]> {
+    return callCommand<ToolExecutionRecord[]>("list_document_tool_executions", { documentId });
+  },
+  listSolutionVerifications(solutionId: string): Promise<VerificationResultRecord[]> {
+    return callCommand<VerificationResultRecord[]>("list_solution_verifications", { solutionId });
+  },
+  listSolutionArtifacts(solutionId: string): Promise<SolutionArtifactItem[]> {
+    return callCommand<SolutionArtifactItem[]>("list_solution_artifacts", { solutionId });
+  },
+  runScienceTool(input: RunScienceToolRequest): Promise<RunScienceToolResult> {
+    return callCommand<RunScienceToolResult>("run_science_tool", { input });
+  },
+  attachArtifactToSolution(
+    solutionId: string,
+    attachmentId: string,
+    caption?: string | null,
+  ): Promise<SolutionOperationResult> {
+    return callCommand<SolutionOperationResult>("attach_artifact_to_solution", {
+      solutionId,
+      attachmentId,
+      caption: caption ?? null,
+    });
   },
 
   // Native Dialogs

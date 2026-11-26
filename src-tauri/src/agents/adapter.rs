@@ -10,6 +10,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::domain::{AgentCapabilities, AgentEventEnvelope, AgentEventPayload, AgentStatus};
+use crate::science_mcp::ScopedMcpServerConfig;
 
 pub type AgentEventStream = Pin<Box<dyn Stream<Item = AgentEventEnvelope> + Send>>;
 
@@ -76,6 +77,8 @@ pub struct SessionConfig {
     /// Explicitly opted-in API key from OS Keychain (ONLY when auth_mode == "api_key_keyring").
     pub explicit_api_key: Option<String>,
     pub deny_shell_by_default: bool,
+    /// Session-scoped MCP servers (never persisted to user global MCP config files).
+    pub mcp_servers: Vec<ScopedMcpServerConfig>,
 }
 
 #[derive(Debug, Clone)]

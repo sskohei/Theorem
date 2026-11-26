@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use chrono::Utc;
@@ -8,14 +6,18 @@ use uuid::Uuid;
 
 use crate::agents::adapter::{AgentImageInput, PermissionDecision};
 use crate::application::AppState;
+use crate::application::science_service::{
+    PersistedPlotArtifact, reconcile_solution_json_with_science_outputs,
+};
 use crate::database::library_repo::NewAttachmentRecord;
-use crate::database::{ai_repo, library_repo};
+use crate::database::science_repo::NewVerificationResult;
+use crate::database::{ai_repo, library_repo, science_repo};
 use crate::document::detect_supported_format;
 use crate::domain::{
     AgentProfile, AgentStatus, ChatMessage, Conversation, GenerateSolutionRequest, Problem,
     RecognizeProblemsRequest, RecognizeProblemsResult, SaveAgentProfileRequest,
     SaveSolutionEditRequest, SchemaValidationIssue, SendChatMessageRequest, SendChatMessageResult,
-    Solution, SolutionOperationResult, UpsertProblemRequest,
+    Solution, SolutionOperationResult, ToolExecutionRecord, UpsertProblemRequest,
 };
 use crate::error::{AppError, AppResult};
 use crate::pdf::compiler::{CompilePdfMetadata, PdfCompileFailure, compile_solution_to_pdf};
@@ -318,6 +320,7 @@ impl AppState {
                 images,
                 chosen_model,
                 Some(recognition_schema_json()),
+                None,
             )
             .await;
 
@@ -521,8 +524,15 @@ impl AppState {
         }
 
         let settings = self.storage.load_settings()?;
+        let effective_purpose = if req.mode == "verified"
+            && settings.agent_assignments.verification_profile_id.is_some()
+        {
+            "verification"
+        } else {
+            "solution"
+        };
         let (profile, explicit_api_key) = self
-            .resolve_profile_for_purpose("solution", req.agent_profile_id.as_deref())
+            .resolve_profile_for_purpose(effective_purpose, req.agent_profile_id.as_deref())
             .await?;
 
         let prompt_text = build_solution_prompt(
@@ -551,7 +561,11 @@ impl AppState {
                 &run_id,
                 None,
                 &profile.id,
-                "solution",
+                if req.mode == "verified" {
+                    "verification"
+                } else {
+                    "solution"
+                },
                 Some(&req.document_id),
                 scoped_problem_id.as_deref(),
                 chosen_model.as_deref(),
@@ -569,6 +583,7 @@ impl AppState {
                 Vec::new(),
                 chosen_model.clone(),
                 Some(solution_schema_json()),
+                Some(&settings.science_mcp),
             )
             .await;
 
@@ -602,6 +617,15 @@ impl AppState {
             .await;
         }
 
+        let (saved_tools, persisted_plots) = self
+            .persist_run_tools_and_plots(
+                &run_id,
+                &req.document_id,
+                &outcome.tool_executions,
+                &outcome.collected_artifacts,
+            )
+            .await?;
+
         if outcome.status != "completed" {
             return Err(AppError::Agent(outcome.error_message.unwrap_or_else(
                 || format!("解答生成が完了しませんでした ({})", outcome.status),
@@ -631,6 +655,8 @@ impl AppState {
                 .map(|_| "エラー修正後の再生成"),
             prob_label.as_deref(),
             prob_stmt.as_deref(),
+            &saved_tools,
+            &persisted_plots,
         )
         .await
     }
@@ -670,6 +696,8 @@ impl AppState {
                 .or(Some("解答エディタで手動編集")),
             prob_label.as_deref(),
             prob_stmt.as_deref(),
+            &[],
+            &[],
         )
         .await
     }
@@ -726,6 +754,9 @@ impl AppState {
         }
 
         let settings = self.storage.load_settings()?;
+        let pdf_artifacts = self
+            .load_pdf_artifacts_for_solution(&val, Some(&sol.id))
+            .await;
         match compile_solution_to_pdf(
             &val,
             &settings.pdf,
@@ -737,7 +768,7 @@ impl AppState {
                 model_name: sol.model_name.as_deref(),
                 generated_at: &sol.created_at,
             },
-            HashMap::new(),
+            pdf_artifacts,
         )
         .await
         {
@@ -823,8 +854,10 @@ impl AppState {
         change_summary: Option<&str>,
         prob_label: Option<&str>,
         prob_stmt: Option<&str>,
+        saved_tools: &[ToolExecutionRecord],
+        persisted_plots: &[PersistedPlotArtifact],
     ) -> AppResult<SolutionOperationResult> {
-        let parsed = match extract_json_value(raw_json_text) {
+        let mut parsed = match extract_json_value(raw_json_text) {
             Ok(v) => v,
             Err(parse_err) => {
                 // Persist invalid version so user can inspect/fix in Solution Editor without losing AI output
@@ -858,6 +891,15 @@ impl AppState {
                 });
             }
         };
+
+        // Reconcile AI JSON with real Science MCP tool verifications & persisted plot paths,
+        // strictly downgrading any AI-spoofed `source_kind: "science_mcp"` to `"ai_self_check"`.
+        let extracted_verifications = reconcile_solution_json_with_science_outputs(
+            &mut parsed,
+            is_user_edit,
+            saved_tools,
+            persisted_plots,
+        );
 
         let pretty_json =
             serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| raw_json_text.to_string());
@@ -905,6 +947,7 @@ impl AppState {
 
         let settings = self.storage.load_settings()?;
         let now_str = Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
+        let pdf_artifacts = self.load_pdf_artifacts_for_solution(&parsed, None).await;
 
         match compile_solution_to_pdf(
             &parsed,
@@ -917,7 +960,7 @@ impl AppState {
                 model_name,
                 generated_at: &now_str,
             },
-            HashMap::new(),
+            pdf_artifacts,
         )
         .await
         {
@@ -950,6 +993,43 @@ impl AppState {
                     },
                 )
                 .await?;
+
+                for v in &extracted_verifications {
+                    let _ = science_repo::insert_verification_result(
+                        db.pool(),
+                        &NewVerificationResult {
+                            solution_id: &saved.id,
+                            tool_execution_id: v.tool_execution_id.as_deref(),
+                            source_kind: &v.source_kind,
+                            target_description: &v.target_description,
+                            assumptions: &v.assumptions,
+                            method: &v.method,
+                            status: &v.status,
+                            detail_json: v.detail_json.as_deref(),
+                        },
+                    )
+                    .await;
+                }
+                for plot in persisted_plots {
+                    let _ = science_repo::insert_solution_artifact(
+                        db.pool(),
+                        &saved.id,
+                        &plot.attachment.id,
+                        "plot",
+                        plot.caption.as_deref(),
+                        plot.source_tool_execution_id.as_deref(),
+                    )
+                    .await;
+                }
+                if let Some(rid) = agent_run_id {
+                    let _ = sqlx::query(
+                        "UPDATE tool_executions SET solution_id = ?1 WHERE agent_run_id = ?2",
+                    )
+                    .bind(&saved.id)
+                    .bind(rid)
+                    .execute(db.pool())
+                    .await;
+                }
 
                 self.logger.log_info(
                     "solution_pdf_compiled",
@@ -1301,6 +1381,7 @@ impl AppState {
         prompt_text.push_str("[今回の質問]\n");
         prompt_text.push_str(req.content_markdown.trim());
 
+        let settings = self.storage.load_settings()?;
         let outcome = self
             .agents
             .run_chat_turn(
@@ -1315,11 +1396,20 @@ impl AppState {
                 prompt_text,
                 agent_images,
                 chosen_model,
+                Some(&settings.science_mcp),
             )
             .await;
 
         match outcome {
             Ok(out) => {
+                let _ = self
+                    .persist_run_tools_and_plots(
+                        &run_id,
+                        &req.document_id,
+                        &out.tool_executions,
+                        &out.collected_artifacts,
+                    )
+                    .await;
                 let db = self.db.read().await;
                 let final_body = if out.final_text.trim().is_empty() && out.status == "failed" {
                     out.error_message

@@ -8,7 +8,7 @@
 
 - **プロジェクト**: **Theorem**（旧称: FormulaDesk）— 大学数学・大学物理の学習に特化した OSS・ローカルファーストのデスクトップアプリ（Windows 11 最優先、将来的に macOS / Linux 対応）。
 - **開発指示書**: [prompts/mvp.md](./prompts/mvp.md)
-- **現在地**: Phase 0（技術検証 PoC）・Phase 1（アプリ基盤 `#2`）・Phase 2（AI 機能統合 `#3`）実装・検証完了、Phase 3（Science MCP Server `#4`）着手待ち。最新の実装・検証状況は必ず [docs/implementation-status.md](./docs/implementation-status.md) を確認すること。
+- **現在地**: Phase 0（技術検証 PoC）・Phase 1（アプリ基盤 `#2`）・Phase 2（AI 機能統合 `#3`）・Phase 3（Science MCP Server `#4`）実装・検証完了、Phase 4（Google Drive 連携 `#5`）着手待ち。最新の実装・検証状況は必ず [docs/implementation-status.md](./docs/implementation-status.md) を確認すること。
 
 ### 作業前に参照すべきドキュメント
 

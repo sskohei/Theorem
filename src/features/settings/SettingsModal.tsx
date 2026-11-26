@@ -25,6 +25,7 @@ import { useLayoutStore, type SettingsCategory } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
 import type { BackupInfo, PdfSettings, RecognitionMode, StorageStats, ThemePreference } from "@/types/ipc";
 import { AgentSettingsPanel, ModelSettingsPanel } from "./AgentSettingsSection";
+import { ScienceMcpSettingsPanel } from "./ScienceMcpSettingsSection";
 
 export function SettingsModal() {
   const t = useI18n();
@@ -88,7 +89,7 @@ export function SettingsModal() {
     { id: "prompts", label: t.settings.categories.prompts, icon: MessageSquareCode },
     { id: "pdf", label: t.settings.categories.pdf, icon: FileText },
     { id: "drive", label: t.settings.categories.drive, icon: Cloud, phase: "Phase 4" },
-    { id: "scienceMcp", label: t.settings.categories.scienceMcp, icon: Calculator, phase: "Phase 3" },
+    { id: "scienceMcp", label: t.settings.categories.scienceMcp, icon: Calculator },
     { id: "storage", label: t.settings.categories.storage, icon: HardDrive },
     { id: "security", label: t.settings.categories.security, icon: ShieldCheck },
     { id: "about", label: t.settings.categories.about, icon: Info },
@@ -619,9 +620,20 @@ export function SettingsModal() {
               </div>
             )}
 
-            {!["general", "appearance", "agents", "models", "prompts", "pdf", "storage", "security", "about"].includes(
-              settingsCategory,
-            ) && (
+            {settingsCategory === "scienceMcp" && <ScienceMcpSettingsPanel />}
+
+            {![
+              "general",
+              "appearance",
+              "agents",
+              "models",
+              "prompts",
+              "pdf",
+              "scienceMcp",
+              "storage",
+              "security",
+              "about",
+            ].includes(settingsCategory) && (
               <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-slate-500 dark:border-slate-700 dark:text-slate-400">
                 {t.settings.upcomingNotice}
               </div>

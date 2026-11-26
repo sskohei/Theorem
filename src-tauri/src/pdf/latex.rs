@@ -16,6 +16,26 @@ pub const OFFLINE_MATH_PRELUDE: &str = r##"
 #let mitexmathrm(x) = math.upright(x)
 #let mitexmathbb(x) = math.bb(x)
 #let mitexmathcal(x) = math.cal(x)
+#let mitexmathfrak(x) = math.frak(x)
+#let mitexmathsf(x) = math.sans(x)
+#let mitexmathtt(x) = math.mono(x)
+#let mitexmathit(x) = math.italic(x)
+#let big(x) = math.lr(x, size: 120%)
+#let Big(x) = math.lr(x, size: 180%)
+#let bigg(x) = math.lr(x, size: 240%)
+#let Bigg(x) = math.lr(x, size: 300%)
+#let bigl(x) = math.class("opening", math.lr(x, size: 120%))
+#let bigr(x) = math.class("closing", math.lr(x, size: 120%))
+#let bigm(x) = math.class("relation", math.lr(x, size: 120%))
+#let Bigl(x) = math.class("opening", math.lr(x, size: 180%))
+#let Bigr(x) = math.class("closing", math.lr(x, size: 180%))
+#let Bigm(x) = math.class("relation", math.lr(x, size: 180%))
+#let biggl(x) = math.class("opening", math.lr(x, size: 240%))
+#let biggr(x) = math.class("closing", math.lr(x, size: 240%))
+#let biggm(x) = math.class("relation", math.lr(x, size: 240%))
+#let Biggl(x) = math.class("opening", math.lr(x, size: 300%))
+#let Biggr(x) = math.class("closing", math.lr(x, size: 300%))
+#let Biggm(x) = math.class("relation", math.lr(x, size: 300%))
 #let pmatrix(..args) = math.mat(delim: "(", ..args)
 #let bmatrix(..args) = math.mat(delim: "[", ..args)
 #let Bmatrix(..args) = math.mat(delim: "{", ..args)
@@ -111,4 +131,24 @@ pub fn convert_and_verify_latex(
     })?;
 
     Ok(upgraded)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pdf::compiler::cached_fonts;
+
+    #[test]
+    fn test_big_delimiters_and_ams_math_convert_offline() {
+        let fonts = cached_fonts();
+        let samples = [
+            r"x(t)=e^{-t}\bigl(A\cos(2t)+B\sin(2t)\bigr),\qquad x(0)=A=1,\qquad x'(0)=-A+2B=0",
+            r"\Bigl[\frac{1}{2} m v^2 + \frac{1}{2} k x^2\Bigr] = \biggl\{ E_0 \biggr\} + \Biggl| \psi \Biggr|",
+            r"\big( a + b \big) \Big( c + d \Big) \bigg[ e \bigg] \Bigg\{ f \Bigg\}",
+        ];
+        for sample in samples {
+            convert_and_verify_latex(sample, "test", None, fonts)
+                .unwrap_or_else(|e| panic!("failed for `{sample}`: {e:?}"));
+        }
+    }
 }

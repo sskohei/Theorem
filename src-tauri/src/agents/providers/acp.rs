@@ -18,6 +18,7 @@ use crate::agents::adapter::{
 use crate::agents::jsonrpc::{IncomingEvent, JsonRpcProcess};
 use crate::agents::sandbox::{probe_cli_version, resolve_cli_binary};
 use crate::domain::{AgentCapabilities, AgentEventPayload, AgentStatus};
+use crate::science_mcp::{ScopedMcpServerConfig, extract_mcp_tool_envelope};
 
 struct AcpLiveSession {
     process: Arc<Mutex<Option<JsonRpcProcess>>>,
@@ -269,6 +270,8 @@ impl AgentAdapter for AcpAdapter {
             ));
         }
 
+        let mcp_servers_json = build_acp_mcp_servers_json(&config.mcp_servers);
+
         let mut resumed = false;
         let ext_session_id = if let Some(ref ext_id) = config.resume_external_session_id
             && caps.supports_session_resume
@@ -279,7 +282,7 @@ impl AgentAdapter for AcpAdapter {
                     json!({
                         "sessionId": ext_id,
                         "cwd": config.workspace_root.to_string_lossy(),
-                        "mcpServers": []
+                        "mcpServers": mcp_servers_json.clone()
                     }),
                     Duration::from_secs(15),
                 )
@@ -295,7 +298,7 @@ impl AgentAdapter for AcpAdapter {
                             "session/new",
                             json!({
                                 "cwd": config.workspace_root.to_string_lossy(),
-                                "mcpServers": []
+                                "mcpServers": mcp_servers_json.clone()
                             }),
                             Duration::from_secs(20),
                         )
@@ -318,7 +321,7 @@ impl AgentAdapter for AcpAdapter {
                     "session/new",
                     json!({
                         "cwd": config.workspace_root.to_string_lossy(),
-                        "mcpServers": []
+                        "mcpServers": mcp_servers_json
                     }),
                     Duration::from_secs(20),
                 )
@@ -487,16 +490,25 @@ impl AgentAdapter for AcpAdapter {
                     maybe_ev = rx_guard.recv() => {
                         match maybe_ev {
                             Some(IncomingEvent::Notification { method, params }) => {
-                                if method == "session/update"
-                                    && let Some(chunk) = extract_acp_update_text(&params)
-                                {
-                                    full_text.push_str(&chunk);
-                                    let _ = tx.send(make_envelope(
-                                        &run_id,
-                                        &sess_id_owned,
-                                        message_id.as_deref(),
-                                        AgentEventPayload::TextDelta { text: chunk },
-                                    ));
+                                if method == "session/update" {
+                                    if let Some(chunk) = extract_acp_update_text(&params) {
+                                        full_text.push_str(&chunk);
+                                        let _ = tx.send(make_envelope(
+                                            &run_id,
+                                            &sess_id_owned,
+                                            message_id.as_deref(),
+                                            AgentEventPayload::TextDelta { text: chunk },
+                                        ));
+                                    } else {
+                                        for payload in extract_acp_tool_events(&params) {
+                                            let _ = tx.send(make_envelope(
+                                                &run_id,
+                                                &sess_id_owned,
+                                                message_id.as_deref(),
+                                                payload,
+                                            ));
+                                        }
+                                    }
                                 }
                             }
                             Some(IncomingEvent::ServerRequest { id, method, params }) => {
@@ -622,6 +634,26 @@ impl AgentAdapter for AcpAdapter {
     }
 }
 
+fn build_acp_mcp_servers_json(servers: &[ScopedMcpServerConfig]) -> Value {
+    let arr: Vec<Value> = servers
+        .iter()
+        .map(|srv| {
+            let env_arr: Vec<Value> = srv
+                .env
+                .iter()
+                .map(|(k, v)| json!({ "name": k, "value": v }))
+                .collect();
+            json!({
+                "name": srv.name,
+                "command": srv.command,
+                "args": srv.args,
+                "env": env_arr
+            })
+        })
+        .collect();
+    Value::Array(arr)
+}
+
 /// Extracts ONLY public `agent_message_chunk` text (never exposes hidden `agent_thought_chunk`).
 fn extract_acp_update_text(params: &Value) -> Option<String> {
     let update = params.get("update")?;
@@ -633,6 +665,98 @@ fn extract_acp_update_text(params: &Value) -> Option<String> {
         .pointer("/content/text")
         .and_then(Value::as_str)
         .map(ToString::to_string)
+}
+
+/// Normalizes ACP `tool_call` / `tool_call_update` notifications into unified `AgentEventPayload`.
+fn extract_acp_tool_events(params: &Value) -> Vec<AgentEventPayload> {
+    let Some(update) = params.get("update") else {
+        return Vec::new();
+    };
+    let Some(kind) = update.get("sessionUpdate").and_then(Value::as_str) else {
+        return Vec::new();
+    };
+
+    let call_id = update
+        .get("toolCallId")
+        .or_else(|| update.get("id"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    let mut out = Vec::new();
+    if kind == "tool_call" {
+        let tool_name = update
+            .get("title")
+            .or_else(|| update.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("mcp_tool")
+            .to_string();
+        let arguments = update
+            .get("rawInput")
+            .or_else(|| update.get("arguments"))
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        out.push(AgentEventPayload::ToolCallStarted {
+            call_id,
+            server: update
+                .get("server")
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
+            tool_name,
+            arguments,
+        });
+    } else if kind == "tool_call_update" {
+        let status = update
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("in_progress");
+        if status == "completed" || status == "failed" {
+            let raw_out = update
+                .get("rawOutput")
+                .or_else(|| update.get("content"))
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            let normalized = extract_mcp_tool_envelope(&raw_out);
+            let succeeded = status == "completed"
+                && normalized
+                    .get("ok")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true);
+            out.push(AgentEventPayload::ToolCallCompleted {
+                call_id,
+                succeeded,
+                output: normalized.clone(),
+            });
+            if let Some(arts) = normalized.get("artifacts").and_then(Value::as_array) {
+                for art in arts {
+                    if let Some(rel) = art.get("relative_path").and_then(Value::as_str) {
+                        out.push(AgentEventPayload::ArtifactCreated {
+                            relative_path: rel.to_string(),
+                            mime_type: art
+                                .get("mime_type")
+                                .and_then(Value::as_str)
+                                .unwrap_or("image/svg+xml")
+                                .to_string(),
+                            caption: art
+                                .get("caption")
+                                .and_then(Value::as_str)
+                                .map(ToString::to_string),
+                        });
+                    }
+                }
+            }
+        } else {
+            out.push(AgentEventPayload::ToolCallUpdated {
+                call_id,
+                status: status.to_string(),
+                progress: update
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string),
+            });
+        }
+    }
+    out
 }
 
 fn build_acp_permission_outcome(params: &Value, decision: PermissionDecision) -> Value {

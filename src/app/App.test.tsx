@@ -39,6 +39,10 @@ vi.mock("@/services/tauriClient", async (importOriginal) => {
       listSolutions: vi.fn(),
       listConversations: vi.fn(),
       listMessages: vi.fn(),
+      listDocumentToolExecutions: vi.fn(),
+      listSolutionVerifications: vi.fn(),
+      listSolutionArtifacts: vi.fn(),
+      checkScienceMcpStatus: vi.fn(),
     },
   };
 });
@@ -141,6 +145,13 @@ const SAMPLE_BOOT: BootstrapState = {
       mathematicsCustomInstructions: "",
       physicsCustomInstructions: "",
       modeCustomInstructions: "",
+    },
+    scienceMcp: {
+      enabled: true,
+      uvPath: null,
+      serverDir: null,
+      timeoutSeconds: 10,
+      defaultPlotFormat: "svg",
     },
   },
 };
@@ -245,6 +256,9 @@ describe("Theorem App Shell & Stores", () => {
     vi.mocked(tauriClient.listSolutions).mockResolvedValue([]);
     vi.mocked(tauriClient.listConversations).mockResolvedValue([]);
     vi.mocked(tauriClient.listMessages).mockResolvedValue([]);
+    vi.mocked(tauriClient.listDocumentToolExecutions).mockResolvedValue([]);
+    vi.mocked(tauriClient.listSolutionVerifications).mockResolvedValue([]);
+    vi.mocked(tauriClient.listSolutionArtifacts).mockResolvedValue([]);
   });
 
   it("renders 3-column workspace, subjects, folders, document list, and image viewer", async () => {
@@ -278,7 +292,7 @@ describe("Theorem App Shell & Stores", () => {
     expect(screen.queryByLabelText("AI チャット")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: /計算結果/ }));
-    expect(screen.getByText("Phase 3 で実装予定")).toBeInTheDocument();
+    expect(screen.getByText("Science MCP 計算・検証・グラフ")).toBeInTheDocument();
   });
 
   it("opens settings modal and switches theme and storage category", async () => {

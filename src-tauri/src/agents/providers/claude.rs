@@ -22,6 +22,7 @@ struct ClaudeSessionState {
     workspace_root: PathBuf,
     api_key: String,
     model_name: Option<String>,
+    mcp_config_path: Option<PathBuf>,
     active_kill_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
 }
 
@@ -53,7 +54,7 @@ impl ClaudeCodeAdapter {
             supports_session_resume: false,
             supports_model_listing: false,
             supports_auth_status_check: false,
-            supports_mcp_scoped_config: false,
+            supports_mcp_scoped_config: allowed,
             supports_permission_hooks: false,
             supports_sandbox_restriction: allowed,
             supports_cancel: allowed,
@@ -124,10 +125,42 @@ impl AgentAdapter for ClaudeCodeAdapter {
         let _binary = resolve_cli_binary(self.manual_path.as_deref(), "claude")
             .ok_or_else(|| AgentError::NotInstalled("claude".into()))?;
 
+        // Write session-scoped MCP config ONLY inside isolated workspace/context (never touches ~/.claude.json)
+        let mcp_config_path = if !config.mcp_servers.is_empty() {
+            let mut mcp_map = serde_json::Map::new();
+            for srv in &config.mcp_servers {
+                let mut env_obj = serde_json::Map::new();
+                for (k, v) in &srv.env {
+                    env_obj.insert(k.clone(), Value::String(v.clone()));
+                }
+                mcp_map.insert(
+                    srv.name.clone(),
+                    serde_json::json!({
+                        "command": srv.command,
+                        "args": srv.args,
+                        "env": Value::Object(env_obj)
+                    }),
+                );
+            }
+            let ctx_dir = config.workspace_root.join("context");
+            let _ = std::fs::create_dir_all(&ctx_dir);
+            let cfg_path = ctx_dir.join("mcp-config.json");
+            let body = serde_json::json!({ "mcpServers": Value::Object(mcp_map) });
+            std::fs::write(
+                &cfg_path,
+                serde_json::to_string_pretty(&body).unwrap_or_default(),
+            )
+            .map_err(|e| AgentError::Transport(format!("MCP 設定書き出し失敗: {e}")))?;
+            Some(cfg_path)
+        } else {
+            None
+        };
+
         let state = Arc::new(ClaudeSessionState {
             workspace_root: config.workspace_root,
             api_key,
             model_name: config.model_name,
+            mcp_config_path,
             active_kill_tx: Arc::new(Mutex::new(None)),
         });
         self.sessions
@@ -174,6 +207,12 @@ impl AgentAdapter for ClaudeCodeAdapter {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
+
+        if let Some(ref mcp_path) = sess.mcp_config_path {
+            cmd.arg("--mcp-config")
+                .arg(mcp_path)
+                .arg("--strict-mcp-config");
+        }
 
         if let Some(model) = input
             .model_override
@@ -366,6 +405,7 @@ mod tests {
                 model_name: None,
                 explicit_api_key: None,
                 deny_shell_by_default: true,
+                mcp_servers: Vec::new(),
             })
             .await;
         assert!(matches!(res, Err(AgentError::PolicyBlocked(_))));

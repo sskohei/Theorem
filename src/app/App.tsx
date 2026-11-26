@@ -26,6 +26,7 @@ import { useChatStore } from "@/stores/useChatStore";
 import { useDocumentStore } from "@/stores/useDocumentStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
+import { useScienceStore } from "@/stores/useScienceStore";
 import type { AgentEventEnvelope } from "@/types/ipc";
 
 export function App() {
@@ -54,8 +55,10 @@ export function App() {
 
   const { loadDocument, currentPage, setCurrentPage } = useDocumentStore();
   const { loadProfiles } = useAgentStore();
-  const { loadForDocument: loadAiForDocument } = useAiWorkspaceStore();
+  const { loadForDocument: loadAiForDocument, selectedSolutionId } = useAiWorkspaceStore();
   const { loadForDocument: loadChatForDocument, handleAgentEvent } = useChatStore();
+  const { loadForDocument: loadScienceForDocument, loadForSolution: loadScienceForSolution } =
+    useScienceStore();
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [draggingOverlay, setDraggingOverlay] = useState(false);
@@ -66,12 +69,23 @@ export function App() {
     void loadProfiles();
   }, [bootstrap, loadProfiles]);
 
-  // 2. Load selected document detail, problems, solutions & conversations
+  // 2. Load selected document detail, problems, solutions, science history & conversations
   useEffect(() => {
     void loadDocument(selectedDocumentId);
     void loadAiForDocument(selectedDocumentId);
     void loadChatForDocument(selectedDocumentId);
-  }, [selectedDocumentId, loadDocument, loadAiForDocument, loadChatForDocument]);
+    void loadScienceForDocument(selectedDocumentId);
+  }, [
+    selectedDocumentId,
+    loadDocument,
+    loadAiForDocument,
+    loadChatForDocument,
+    loadScienceForDocument,
+  ]);
+
+  useEffect(() => {
+    void loadScienceForSolution(selectedSolutionId);
+  }, [selectedSolutionId, loadScienceForSolution]);
 
   // 2b. Subscribe to live Rust AgentManager streaming events (`agent://event`)
   useEffect(() => {
@@ -298,7 +312,7 @@ export function App() {
             {t.appName}
           </span>
           <Badge variant="info" className="hidden sm:inline-flex">
-            Phase 2
+            Phase 3
           </Badge>
         </div>
 

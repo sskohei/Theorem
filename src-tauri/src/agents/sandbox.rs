@@ -149,6 +149,15 @@ pub fn resolve_cli_binary(manual_path: Option<&str>, binary_name: &str) -> Optio
             let home = PathBuf::from(profile);
             search_dirs.push(home.join(".cargo").join("bin"));
             search_dirs.push(home.join(".local").join("bin"));
+            search_dirs.push(home.join("miniforge3").join("Scripts"));
+            search_dirs.push(home.join("miniconda3").join("Scripts"));
+            search_dirs.push(home.join("anaconda3").join("Scripts"));
+        }
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            let base = PathBuf::from(local).join("Programs").join("Python");
+            for py_ver in ["Python313", "Python312", "Python311"] {
+                search_dirs.push(base.join(py_ver).join("Scripts"));
+            }
         }
     }
 

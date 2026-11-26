@@ -17,6 +17,16 @@ export interface PendingPermissionRequest {
   detail: string;
 }
 
+export interface LiveToolCallItem {
+  callId: string;
+  server: string | null;
+  toolName: string;
+  arguments: unknown;
+  status: "running" | "succeeded" | "failed";
+  progress: string | null;
+  output: unknown;
+}
+
 interface ChatStoreState {
   activeDocumentId: string | null;
   conversations: Conversation[];
@@ -31,6 +41,7 @@ interface ChatStoreState {
   sending: boolean;
   activeRunId: string | null;
   streamingText: string;
+  liveToolCalls: LiveToolCallItem[];
   pendingPermissions: PendingPermissionRequest[];
   error: ApiError | null;
 
@@ -79,6 +90,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   sending: false,
   activeRunId: null,
   streamingText: "",
+  liveToolCalls: [],
   pendingPermissions: [],
   error: null,
 
@@ -90,6 +102,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
         activeConversationId: null,
         messages: [],
         streamingText: "",
+        liveToolCalls: [],
         pendingPermissions: [],
         error: null,
       });
@@ -192,6 +205,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     set((s) => ({
       sending: true,
       streamingText: "",
+      liveToolCalls: [],
       activeRunId: null,
       pendingPermissions: [],
       messages: [...s.messages, optimisticUser],
@@ -262,6 +276,40 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       set((s) => ({
         activeRunId: s.activeRunId ?? envelope.runId,
         streamingText: s.streamingText + ev.text,
+      }));
+    } else if (ev.type === "toolCallStarted") {
+      set((s) => ({
+        activeRunId: s.activeRunId ?? envelope.runId,
+        liveToolCalls: [
+          ...s.liveToolCalls.filter((c) => c.callId !== ev.callId),
+          {
+            callId: ev.callId,
+            server: ev.server,
+            toolName: ev.toolName,
+            arguments: ev.arguments,
+            status: "running",
+            progress: null,
+            output: null,
+          },
+        ],
+      }));
+    } else if (ev.type === "toolCallUpdated") {
+      set((s) => ({
+        liveToolCalls: s.liveToolCalls.map((c) =>
+          c.callId === ev.callId ? { ...c, progress: ev.progress } : c,
+        ),
+      }));
+    } else if (ev.type === "toolCallCompleted") {
+      set((s) => ({
+        liveToolCalls: s.liveToolCalls.map((c) =>
+          c.callId === ev.callId
+            ? {
+                ...c,
+                status: ev.succeeded ? "succeeded" : "failed",
+                output: ev.output,
+              }
+            : c,
+        ),
       }));
     } else if (ev.type === "permissionRequested") {
       set((s) => ({

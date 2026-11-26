@@ -231,6 +231,9 @@ pub fn build_solution_prompt(
         .unwrap_or("mathematics");
 
     let mode_desc = match mode {
+        "verified" => {
+            "計算検証付きモード (verified): 利用可能な Science MCP Server の計算・検証ツール（solve_equation, differentiate, integrate, verify_equation, solve_ode, calculate_determinant, convert_units, check_dimensions, plot_function 等）を積極的に呼び出して途中式・最終解・物理次元を実検証し、必要に応じてグラフ（SVG 優先）を生成したうえで解答を記述する。"
+        }
         "detailed" => {
             "詳細解説モード: 各変形・論理飛躍の根拠、使用定理の成立条件、物理的解釈・極限考察まで丁寧に記述する。"
         }

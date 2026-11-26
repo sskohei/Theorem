@@ -153,7 +153,7 @@ export const ja = {
       version: "バージョン",
       license: "ライセンス",
       status: "開発フェーズ",
-      statusValue: "Phase 2：AI 機能統合（MVP 開発中）",
+      statusValue: "Phase 3：Science MCP Server・計算検証・グラフ PDF 統合（MVP 開発中）",
     },
     upcomingNotice: "この設定カテゴリは後続フェーズで有効化されます。",
   },

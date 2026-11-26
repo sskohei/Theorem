@@ -6,10 +6,11 @@ use crate::domain::{
     AgentProfile, AgentStatus, AppSettings, AttachmentBinaryResponse, AttachmentInfo, BackupInfo,
     BootstrapState, ChatMessage, Conversation, DocumentDetail, DocumentFilter, DocumentSummary,
     Folder, GenerateSolutionRequest, ImportBatchResult, ImportedDocumentItem, Problem,
-    RecognizeProblemsRequest, RecognizeProblemsResult, SaveAgentProfileRequest,
-    SaveSolutionEditRequest, SendChatMessageRequest, SendChatMessageResult, Solution,
-    SolutionOperationResult, StorageStats, Subject, Tag, UpdateDocumentRequest,
-    UpsertProblemRequest,
+    RecognizeProblemsRequest, RecognizeProblemsResult, RunScienceToolRequest, RunScienceToolResult,
+    SaveAgentProfileRequest, SaveSolutionEditRequest, ScienceMcpStatus, SendChatMessageRequest,
+    SendChatMessageResult, Solution, SolutionArtifactItem, SolutionOperationResult, StorageStats,
+    Subject, Tag, ToolExecutionRecord, UpdateDocumentRequest, UpsertProblemRequest,
+    VerificationResultRecord,
 };
 use crate::error::ApiError;
 
@@ -566,6 +567,74 @@ pub async fn send_chat_message(
 ) -> Result<SendChatMessageResult, ApiError> {
     state
         .send_chat_message(&input)
+        .await
+        .map_err(ApiError::from)
+}
+
+// ============================================================================
+// Phase 3: Science MCP Server, Tool Executions, Verifications & Artifacts
+// ============================================================================
+
+#[tauri::command]
+pub async fn check_science_mcp_status(
+    state: State<'_, AppState>,
+) -> Result<ScienceMcpStatus, ApiError> {
+    state
+        .check_science_mcp_status()
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn list_document_tool_executions(
+    state: State<'_, AppState>,
+    document_id: String,
+) -> Result<Vec<ToolExecutionRecord>, ApiError> {
+    state
+        .list_document_tool_executions(&document_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn list_solution_verifications(
+    state: State<'_, AppState>,
+    solution_id: String,
+) -> Result<Vec<VerificationResultRecord>, ApiError> {
+    state
+        .list_solution_verifications(&solution_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn list_solution_artifacts(
+    state: State<'_, AppState>,
+    solution_id: String,
+) -> Result<Vec<SolutionArtifactItem>, ApiError> {
+    state
+        .list_solution_artifacts(&solution_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn run_science_tool(
+    state: State<'_, AppState>,
+    input: RunScienceToolRequest,
+) -> Result<RunScienceToolResult, ApiError> {
+    state.run_science_tool(&input).await.map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn attach_artifact_to_solution(
+    state: State<'_, AppState>,
+    solution_id: String,
+    attachment_id: String,
+    caption: Option<String>,
+) -> Result<SolutionOperationResult, ApiError> {
+    state
+        .attach_artifact_to_solution(&solution_id, &attachment_id, caption.as_deref())
         .await
         .map_err(ApiError::from)
 }
