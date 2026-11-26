@@ -241,10 +241,75 @@ impl AgentAdapter for MockAdapter {
                 return;
             }
 
-            // Detect structured problem recognition vs solution generation vs normal chat
-            let response_text = if prompt_text.contains("問題文認識エンジン") {
+            // Detect structured problem recognition vs partial revision vs solution generation vs normal chat
+            let response_text = if prompt_text.contains("解答部分修正エンジン") {
+                // Extract the current structured JSON from the revision prompt and apply a clean deterministic partial edit
+                let base_json_opt = prompt_text
+                    .split("【現行の構造化解答 JSON（修正前）】")
+                    .nth(1)
+                    .and_then(|rest| rest.split("【ユーザーからの部分修正指示】").next())
+                    .and_then(|chunk| crate::prompts::extract_json_value(chunk).ok());
+                let instruction_snip = prompt_text
+                    .split("【ユーザーからの部分修正指示】")
+                    .nth(1)
+                    .map(str::trim)
+                    .unwrap_or("途中式を補強");
+
+                let mut proposed = base_json_opt.unwrap_or_else(|| {
+                    json!({
+                        "schema_version": 1,
+                        "subject": "mathematics",
+                        "field": "calculus",
+                        "title": "部分修正提案解答",
+                        "mode": "detailed",
+                        "steps": [{ "type": "explanation", "text": "元のステップ" }],
+                        "answer": { "text": "結果", "latex": "I = \\frac{\\sqrt{\\pi}}{2}" }
+                    })
+                });
+                if let Some(obj) = proposed.as_object_mut() {
+                    let steps = obj
+                        .entry("steps")
+                        .or_insert_with(|| json!([]))
+                        .as_array_mut();
+                    if let Some(arr) = steps {
+                        arr.push(json!({
+                            "type": "explanation",
+                            "heading": "部分修正による補足",
+                            "text": format!("修正指示（{}）に基づき、ヤコビアンおよび積分領域の厳密性を補足した。", instruction_snip),
+                            "latex": "\\left|\\det \\frac{\\partial(x,y)}{\\partial(r,\\theta)}\\right| = r \\ge 0",
+                            "display": true
+                        }));
+                    }
+                    if let Some(ans) = obj.get_mut("answer").and_then(|v| v.as_object_mut()) {
+                        ans.insert(
+                            "text".to_string(),
+                            json!("部分修正済み：極座標変換のヤコビアン確認を含め厳密に得られた。"),
+                        );
+                    }
+                }
+                proposed.to_string()
+            } else if prompt_text.contains("問題文認識エンジン") {
                 if prompt_text.contains("[TEST_INVALID_JSON]") {
                     "not valid json".to_string()
+                } else if prompt_text.contains("手書き答案認識モード") {
+                    json!({
+                        "schema_version": 1,
+                        "problems": [
+                            {
+                                "problem_number": "答案1",
+                                "subproblem_number": null,
+                                "subject_category": "mathematics",
+                                "field": "calculus",
+                                "statement_markdown": "【問題】$\\int_0^1 x^2\\,dx$ を求めよ。\n\n【手書き答案書き起こし】$\\int_0^1 x^2\\,dx = \\left[\\frac{x^2}{2}\\right]_0^1 = \\frac{1}{2}$",
+                                "given_conditions": ["手書き答案を未修正のまま書き起こし"],
+                                "target_objective": "ユーザー答案の添削対象",
+                                "source_pages": [1],
+                                "figure_refs": [],
+                                "uncertainties": ["3行目の指数文字がやや薄い（2 または 3 を要確認）"]
+                            }
+                        ]
+                    })
+                    .to_string()
                 } else {
                     let pages = if cfg!(test) && prompt_text.contains("[TEST_REPEATED_PROBLEM]") {
                         [1, 2]
@@ -276,7 +341,93 @@ impl AgentAdapter for MockAdapter {
                     json!({"schema_version": 1, "problems": problems}).to_string()
                 }
             } else if prompt_text.contains("Theorem Solution Schema v1") {
-                if prompt_text.contains("[TEST_BAD_LATEX]") {
+                if prompt_text.contains("【生成モード】review") {
+                    json!({
+                        "schema_version": 1,
+                        "subject": "mathematics",
+                        "field": "calculus",
+                        "title": "ユーザー答案の添削と正しい導出",
+                        "mode": "review",
+                        "assumptions": ["ユーザー答案の誤りを特定し、正しい導出を提示する"],
+                        "steps": [
+                            {
+                                "type": "explanation",
+                                "heading": "1. ユーザー答案の診断",
+                                "text": "積分区間の設定は正しいが、原始関数を求める際にべき乗の次数を 1 増やす操作が抜けており $x^2/2$ となっている点が誤りです。"
+                            },
+                            {
+                                "type": "equation",
+                                "heading": "2. 正しい導出",
+                                "text": "正しくは $\\int x^n\\,dx = \\frac{x^{n+1}}{n+1}$ を適用する。",
+                                "latex": "\\int_0^1 x^2\\,dx = \\left[ \\frac{x^3}{3} \\right]_0^1 = \\frac{1}{3}",
+                                "display": true
+                            }
+                        ],
+                        "answer": {
+                            "text": "誤答 $\\frac{1}{2}$ を修正し、正答は $\\frac{1}{3}$。",
+                            "latex": "\\frac{1}{3}",
+                            "unit": null
+                        },
+                        "verification": [
+                            {
+                                "source_kind": "ai_self_check",
+                                "target": "原始関数の微分検算",
+                                "method": "d/dx (x^3/3) = x^2",
+                                "status": "passed",
+                                "note": "検算一致"
+                            }
+                        ],
+                        "artifacts": [],
+                        "warnings": ["指数法則の適用ミスに注意してください。"]
+                    })
+                    .to_string()
+                } else if prompt_text.contains("【生成モード】beginner") {
+                    json!({
+                        "schema_version": 1,
+                        "subject": "mathematics",
+                        "field": "calculus",
+                        "title": "初学者向けガウス積分ステップ解説",
+                        "mode": "beginner",
+                        "assumptions": ["極座標の微小面積要素 dA = r dr dθ を確認する"],
+                        "steps": [
+                            {
+                                "type": "explanation",
+                                "heading": "1. なぜ 2 乗するのか（直感的イメージ）",
+                                "text": "1 変数のままでは初等関数で不定積分が表せないため、2 変数の円対称性を使って極座標で解きます。"
+                            },
+                            {
+                                "type": "equation",
+                                "latex": "I^2 = \\int_0^{\\pi/2} d\\theta \\int_0^{\\infty} r e^{-r^2}\\,dr = \\frac{\\pi}{4}",
+                                "display": true
+                            }
+                        ],
+                        "answer": { "text": "正の平方根をとると次を得る。", "latex": "I = \\frac{\\sqrt{\\pi}}{2}" },
+                        "verification": [],
+                        "artifacts": [],
+                        "warnings": ["ヤコビアン r を掛け忘れるミスが多いので注意してください。"]
+                    })
+                    .to_string()
+                } else if prompt_text.contains("【生成モード】concise") {
+                    json!({
+                        "schema_version": 1,
+                        "subject": "mathematics",
+                        "field": "calculus",
+                        "title": "ガウス積分（簡潔模範解答）",
+                        "mode": "concise",
+                        "steps": [
+                            {
+                                "type": "equation",
+                                "latex": "I^2 = \\int_0^{\\pi/2} d\\theta \\int_0^{\\infty} r e^{-r^2}\\,dr = \\frac{\\pi}{4} \\implies I = \\frac{\\sqrt{\\pi}}{2}",
+                                "display": true
+                            }
+                        ],
+                        "answer": { "latex": "I = \\frac{\\sqrt{\\pi}}{2}" },
+                        "verification": [],
+                        "artifacts": [],
+                        "warnings": []
+                    })
+                    .to_string()
+                } else if prompt_text.contains("[TEST_BAD_LATEX]") {
                     json!({
                         "schema_version": 1,
                         "subject": "mathematics",

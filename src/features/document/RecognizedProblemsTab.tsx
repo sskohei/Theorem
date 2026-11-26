@@ -14,13 +14,21 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useI18n } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
+import { cn, uint8ArrayToBase64 } from "@/lib/utils";
 import { useAgentStore } from "@/stores/useAgentStore";
 import { useAiWorkspaceStore } from "@/stores/useAiWorkspaceStore";
 import { useDocumentStore } from "@/stores/useDocumentStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
-import type { Problem, RecognitionMode, SolutionMode, SubjectCategory } from "@/types/ipc";
+import { useStudyStore } from "@/stores/useStudyStore";
+import { ReferenceMaterialsPanel } from "@/features/study/ReferenceMaterialsPanel";
+import type {
+  ChatImageUpload,
+  Problem,
+  RecognitionMode,
+  SolutionMode,
+  SubjectCategory,
+} from "@/types/ipc";
 
 const MATH_FIELDS: [string, string][] = [
   ["calculus", "微分積分学"],
@@ -86,6 +94,9 @@ export function RecognizedProblemsTab({ onTriggerRecognize, preparing = false }:
   const [targetScope, setTargetScope] = useState<
     "single_problem" | "all_problems" | "page_range"
   >("single_problem");
+  const [userAttemptText, setUserAttemptText] = useState("");
+  const [userAttemptImages, setUserAttemptImages] = useState<ChatImageUpload[]>([]);
+  const { selectedReferenceIds } = useStudyStore();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<{
@@ -189,6 +200,10 @@ export function RecognizedProblemsTab({ onTriggerRecognize, preparing = false }:
       targetScope,
       pageRangeStart: targetScope === "page_range" ? pageRangeStart : null,
       pageRangeEnd: targetScope === "page_range" ? pageRangeEnd : null,
+      referenceMaterialIds: selectedReferenceIds,
+      userAttemptMarkdown:
+        solutionMode === "review" && userAttemptText.trim() ? userAttemptText.trim() : null,
+      userAttemptImages: solutionMode === "review" ? userAttemptImages : [],
     });
     if (res) {
       if (
@@ -227,6 +242,7 @@ export function RecognizedProblemsTab({ onTriggerRecognize, preparing = false }:
             <option value="page_range">
               ページ範囲指定 ({pageRangeStart}〜{pageRangeEnd})
             </option>
+            <option value="handwritten_answer">手書き答案認識（添削用）</option>
           </select>
           {recMode === "page_range" &&
             detail?.document.sourceType === "pdf" &&
@@ -313,10 +329,12 @@ export function RecognizedProblemsTab({ onTriggerRecognize, preparing = false }:
             className="h-7 rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-800"
           >
             <option value="standard">標準 (standard)</option>
-            <option value="concise">簡潔 (concise)</option>
+            <option value="concise">簡潔模範解答 (concise)</option>
             <option value="detailed">詳細解説 (detailed)</option>
             <option value="rigorous">厳密証明 (rigorous)</option>
+            <option value="beginner">初学者向け解説 (beginner)</option>
             <option value="verified">計算検証付き (verified / Science MCP)</option>
+            <option value="review">答案添削 (review)</option>
             <option value="hint">ヒント (hint)</option>
           </select>
 
@@ -331,6 +349,66 @@ export function RecognizedProblemsTab({ onTriggerRecognize, preparing = false }:
           </Button>
         </div>
       </div>
+
+      {/* Phase 5: User Attempt Input for Review Mode */}
+      {solutionMode === "review" && (
+        <div className="space-y-2 border-b border-amber-200 bg-amber-50/70 px-3 py-2 text-xs dark:border-amber-900 dark:bg-amber-950/40">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-semibold text-amber-950 dark:text-amber-100">
+              添削対象のユーザー答案（テキストまたは手書き答案画像）
+            </span>
+            <label className="inline-flex cursor-pointer items-center gap-1 rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-slate-900 dark:text-amber-100">
+              <span>答案画像を追加</span>
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  const files = e.target.files;
+                  if (!files) return;
+                  void Promise.all(
+                    Array.from(files).map(async (f) => ({
+                      filename: f.name,
+                      mimeType: f.type,
+                      base64Data: uint8ArrayToBase64(new Uint8Array(await f.arrayBuffer())),
+                    })),
+                  ).then((items) => setUserAttemptImages((prev) => [...prev, ...items]));
+                }}
+              />
+            </label>
+          </div>
+          <textarea
+            aria-label="添削対象のユーザー答案"
+            rows={3}
+            value={userAttemptText}
+            onChange={(e) => setUserAttemptText(e.target.value)}
+            placeholder="自分の途中式・解答（Markdown / LaTeX 可）を入力するか、上のボタンから手書き答案画像を添付してください。"
+            className="w-full rounded-md border border-amber-300 bg-white p-2 text-xs dark:border-amber-800 dark:bg-slate-950"
+          />
+          {userAttemptImages.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {userAttemptImages.map((img, i) => (
+                <Badge key={i} variant="outline" className="gap-1">
+                  <span>{img.filename}</span>
+                  <button
+                    type="button"
+                    onClick={() => setUserAttemptImages((p) => p.filter((_, idx) => idx !== i))}
+                  >
+                    ×
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Phase 5: Selective Lecture / Reference Materials */}
+      <ReferenceMaterialsPanel
+        documentId={docId}
+        subjectId={detail?.document.subjectId ?? null}
+      />
 
       {/* Image Unsupported Warning */}
       {imageUnsupported && (

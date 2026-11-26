@@ -8,6 +8,8 @@ import type {
   DocumentSummary,
   DuplicateMatch,
   Folder,
+  FullTextSearchHit,
+  StudyStatus,
   Subject,
   SubjectCategory,
   Tag,
@@ -32,7 +34,10 @@ interface LibraryState {
   selectedSubjectId: string | null;
   selectedFolderId: string | null;
   selectedTagId: string | null;
+  selectedStudyStatus: StudyStatus | null;
   searchQuery: string;
+  ftsHits: FullTextSearchHit[];
+  ftsLoading: boolean;
   selectedDocumentId: string | null;
 
   duplicateNotice: DuplicateMatch[] | null;
@@ -45,7 +50,10 @@ interface LibraryState {
   selectSubjectFilter: (subjectId: string | null) => Promise<void>;
   selectFolderFilter: (subjectId: string, folderId: string | null) => Promise<void>;
   selectTagFilter: (tagId: string | null) => Promise<void>;
+  setStudyStatusFilter: (status: StudyStatus | null) => Promise<void>;
   setSearchQuery: (query: string) => Promise<void>;
+  runFullTextSearch: (query: string) => Promise<void>;
+  clearFullTextSearch: () => void;
   selectDocument: (documentId: string | null) => void;
 
   createSubject: (name: string, category: SubjectCategory, description?: string) => Promise<void>;
@@ -67,6 +75,7 @@ interface LibraryState {
   setDocumentTags: (documentId: string, tagIds: string[]) => Promise<void>;
 
   toggleFavorite: (doc: DocumentSummary) => Promise<void>;
+  setDocumentStudyStatus: (id: string, studyStatus: StudyStatus) => Promise<void>;
   renameDocument: (id: string, title: string) => Promise<void>;
   moveDocument: (id: string, subjectId: string, folderId: string | null) => Promise<void>;
   deleteDocument: (id: string) => Promise<void>;
@@ -124,6 +133,7 @@ function buildFilter(s: LibraryState): DocumentFilter {
     folderId: s.selectedFolderId,
     tagId: s.selectedTagId,
     searchQuery: s.searchQuery.trim() ? s.searchQuery.trim() : null,
+    studyStatus: s.selectedStudyStatus,
     favoritesOnly: s.quickView === "favorites",
     recentOnly: s.quickView === "recent",
   };
@@ -156,7 +166,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   selectedSubjectId: null,
   selectedFolderId: null,
   selectedTagId: null,
+  selectedStudyStatus: null,
   searchQuery: "",
+  ftsHits: [],
+  ftsLoading: false,
   selectedDocumentId: null,
 
   duplicateNotice: null,
@@ -239,10 +252,41 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     await get().refreshDocuments();
   },
 
+  setStudyStatusFilter: async (status) => {
+    set((s) => ({
+      selectedStudyStatus: s.selectedStudyStatus === status ? null : status,
+    }));
+    await get().refreshDocuments();
+  },
+
   setSearchQuery: async (query) => {
     set({ searchQuery: query });
     await get().refreshDocuments();
   },
+
+  runFullTextSearch: async (query) => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      set({ ftsHits: [], ftsLoading: false });
+      return;
+    }
+    set({ ftsLoading: true, error: null });
+    try {
+      const s = get();
+      const hits = await tauriClient.fullTextSearch({
+        query: trimmed,
+        subjectId: s.selectedSubjectId,
+        studyStatus: s.selectedStudyStatus,
+        favoritesOnly: s.quickView === "favorites",
+        limit: 40,
+      });
+      set({ ftsHits: hits, ftsLoading: false });
+    } catch (err) {
+      set({ ftsLoading: false, error: normalizeApiError(err) });
+    }
+  },
+
+  clearFullTextSearch: () => set({ ftsHits: [], ftsLoading: false }),
 
   selectDocument: (documentId) => {
     set({ selectedDocumentId: documentId });
@@ -371,6 +415,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   toggleFavorite: async (doc) => {
     try {
       await tauriClient.updateDocument({ id: doc.id, isFavorite: !doc.isFavorite });
+      await get().refreshDocuments();
+    } catch (err) {
+      set({ error: normalizeApiError(err) });
+    }
+  },
+
+  setDocumentStudyStatus: async (id, studyStatus) => {
+    try {
+      await tauriClient.updateDocument({ id, studyStatus });
       await get().refreshDocuments();
     } catch (err) {
       set({ error: normalizeApiError(err) });

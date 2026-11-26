@@ -117,6 +117,87 @@ const TOOL_PRESETS: ToolPreset[] = [
       title: "Rotational Field",
     },
   },
+  {
+    name: "plot_free_body_diagram",
+    label: "自由物体図・力のベクトル図 (plot_free_body_diagram)",
+    sampleArgs: {
+      forces: [
+        { label: "mg", fx: 0, fy: -9.8 },
+        { label: "N", fx: 0, fy: 9.8 },
+        { label: "T", fx: 4.0, fy: 0 },
+        { label: "f", fx: -4.0, fy: 0 },
+      ],
+      body_label: "m",
+      incline_deg: 0,
+      show_components: false,
+      title: "Free-Body Diagram",
+    },
+  },
+  {
+    name: "plot_circuit_diagram",
+    label: "電気回路図 RLC (plot_circuit_diagram)",
+    sampleArgs: {
+      elements: [
+        { kind: "voltage_source", label: "E", value: "12V" },
+        { kind: "resistor", label: "R", value: "100Ω" },
+        { kind: "inductor", label: "L", value: "10mH" },
+        { kind: "capacitor", label: "C", value: "47μF" },
+      ],
+      topology: "series",
+      title: "RLC Series Circuit",
+    },
+  },
+  {
+    name: "plot_field_lines",
+    label: "電場・磁場の力線と等電位線 (plot_field_lines)",
+    sampleArgs: {
+      field_kind: "electric",
+      sources: [
+        { x: -1, y: 0, q: 1 },
+        { x: 1, y: 0, q: -1 },
+      ],
+      show_equipotentials: true,
+      title: "Electric Dipole Field",
+    },
+  },
+  {
+    name: "plot_wave",
+    label: "波動・重ね合わせ・定常波 (plot_wave)",
+    sampleArgs: {
+      waves: [
+        { amplitude: 1, wavenumber: 4, omega: 2, phase: 0, label: "y1" },
+        { amplitude: 1, wavenumber: 4.5, omega: 2.1, phase: 0, label: "y2" },
+      ],
+      t: 0.5,
+      show_superposition: true,
+      show_envelope: true,
+      title: "Wave Superposition & Beats",
+    },
+  },
+  {
+    name: "plot_potential_energy",
+    label: "ポテンシャルエネルギー曲線・転回点 (plot_potential_energy)",
+    sampleArgs: {
+      expression: "x**2 / 2",
+      variable: "x",
+      x_range: [-4, 4],
+      energy_levels: [2.0, 4.5],
+      title: "Harmonic Potential Well",
+    },
+  },
+  {
+    name: "plot_trajectory",
+    label: "運動の軌跡・速度ベクトル (plot_trajectory)",
+    sampleArgs: {
+      x_expression: "10 * t",
+      y_expression: "10 * t - 4.9 * t**2",
+      parameter: "t",
+      t_range: [0, 2.04],
+      show_velocity_vectors: true,
+      num_vectors: 6,
+      title: "Projectile Trajectory",
+    },
+  },
 ];
 
 function renderVerificationStatusBadge(status: VerificationStatus) {

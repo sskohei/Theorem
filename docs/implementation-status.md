@@ -1,7 +1,7 @@
 # 実装・技術検証状況（Implementation Status）
 
 > **最終更新**: 2026-11-27
-> **現在フェーズ**: **Phase 4（Google Drive 連携・MVP `#5`）実装・ローカル自動検証（Rust / Mock Drive HTTP サーバー / 大学数学 12 ステップ & 物理 3 事例 E2E / React Vitest / Python Science MCP 回帰 / Windows 11 `theorem.exe` ビルド・起動スモーク）完了**（実 Google アカウント OAuth 接続検証は `GOOGLE_OAUTH_CLIENT_ID` 未提供のため保留；未導入の Claude Code 実機接続も引き続き保留として記録。Phase 5 高度な学習機能 `#6` へ移行可能）
+> **現在フェーズ**: **Phase 5（高度な学習機能 `#6`）実装・自動検証完了（Phase 2 レビュー修正 `29b433f` 統合済み）**（Phase 6 OSS 正式公開 `#7` 着手可能；実 Google アカウント OAuth 接続および未導入の Claude Code 実機接続は引き続き保留として記録）
 > **誠実性ルール**: 未実装機能を完成済みと記載しない。モックテスト合格と外部サービス実接続確認を明確に区別する。外部認証が必要な項目は認証情報なしで「動作確認済み」にしない。
 
 ---
@@ -10,21 +10,21 @@
 
 | ドキュメント | 状態 | 備考 |
 |---|---|---|
-| `README.md` / `AGENTS.md` | 更新済み | アプリ名 `Theorem` 改称および Phase 4（MVP）完了・保留項目を反映 |
+| `README.md` / `AGENTS.md` | 更新済み | アプリ名 `Theorem` 改称および Phase 5 完了・保留項目を反映 |
 | `docs/product-specification.md` | 作成済み (v1.0) | 製品全体仕様・MVP 完成条件 19 項目 |
 | `docs/requirements.md` | 作成済み (v1.0) | 機能・非機能要件・禁止事項 |
 | `docs/architecture.md` | 作成済み (v1.0) | 全体構成・参考 OSS 調査・ストレージ設計 |
-| `docs/database.md` | 作成済み (v1.0) | 全 21 テーブル・ER 図・インデックス・マイグレーション計画（`0001`〜`0004` 実装済） |
+| `docs/database.md` | 作成済み (v1.0) | 全 21 テーブル・ER 図・インデックス・マイグレーション計画（`0001`〜`0005` 実装済） |
 | `docs/agent-integration.md` | 作成済み (v1.0) | 共通 IF・イベント・Capability・プロセス管理 |
 | `docs/provider-compatibility.md` | 更新済み (Phase 0 反映) | Codex / Antigravity / Custom ACP 検証結果・Claude 制約記録 |
-| `docs/science-mcp.md` | 更新済み (Implemented v1.1) | 全 21 ツール仕様・AST 安全パーサー・`lambdify` 禁止・実機検証反映 |
+| `docs/science-mcp.md` | 更新済み (Implemented v1.2) | 全 27 ツール仕様（Phase 5 高度物理図 6 種追加）・AST 安全パーサー・`lambdify` 禁止 |
 | `docs/pdf-generation.md` | 更新済み (v1.1) | Embedded Typst 0.15.1 + `mitex` + 互換プレリュード確定 |
 | `docs/google-drive.md` | 更新済み (Implemented v1.1) | OAuth PKCE・`drive.file`・永続ジョブキュー・同一 ID 更新・競合検出実装を反映 |
 | `docs/security.md` | 作成済み (v1.0) | 脅威モデル・隔離・Tauri Capability/CSP |
 | `docs/ui-design.md` | 作成済み (v1.0) | 3 カラム画面・6 タブ・11 設定カテゴリ |
 | `docs/testing.md` | 作成済み (v1.0) | Rust/React/Python/統合テスト計画 |
 | `docs/development.md` | 更新済み (v1.4) | Phase 4 Google Drive ライブ検証コマンドおよび開発手順を反映 |
-| `docs/roadmap.md` | 更新済み (v1.3) | Phase 0〜6 計画・Phase 4 完了反映・GitHub Issue (`#1`〜`#7`) 対応 |
+| `docs/roadmap.md` | 更新済み (v1.4) | Phase 0〜6 計画・Phase 5 完了反映・GitHub Issue (`#1`〜`#7`) 対応 |
 | `docs/adr/` (ADR-0001〜0007) | 更新済み | **全 7 件 Accepted**（ADR-0004 を Phase 0 検証結果で確定） |
 | `poc/README.md` | 作成済み | Phase 0 実行可能 PoC の実行手順・実測レポート |
 | `schemas/`・`templates/` | 作成済み (Phase 2) | `recognition.v1.schema.json` / `solution.v1.schema.json`・検証済み Typst テンプレート 5 種 |
@@ -83,7 +83,7 @@
 | Phase 2 | [#3](https://github.com/sskohei/Theorem/issues/3) | AI アダプター / 問題認識 / 解答生成 / チャット / PDF / バージョン管理 / `Theorem` 改称 | **実装・検証完了** | 通過（Rust `cargo test --lib` 19 テスト・clippy/fmt 0 警告；Vitest 3 ファイル 12 テスト・typecheck/lint/build 通過） | **OpenAI Codex 実機 E2E 通過**（`test_live_codex_full_phase2_workflow` 45.1s）および Windows 11 `theorem.exe` 起動スモーク確認済（Claude Code 実機は未導入のため保留） |
 | Phase 3 | [#4](https://github.com/sskohei/Theorem/issues/4) | Science MCP Server（Python / `uv`・全 21 ツール）/ AST 安全パーサー / SQLite 検証・履歴 / グラフ PDF 埋め込み / UI「計算結果」・設定「計算ツール」 | **実装・検証完了** | 通過（Python `uv run pytest` 41 テスト・Ruff lint/format 0 警告；Rust `cargo test --lib` 22 テスト・clippy/fmt 0 警告；Vitest 4 ファイル 15 テスト・typecheck/lint/build 通過） | **OpenAI Codex + 実 Science MCP Server E2E 通過**（`test_live_codex_phase3_science_mcp` 89.5s）および Windows 11 Tauri デバッグビルド通過 |
 | Phase 4 | [#5](https://github.com/sskohei/Theorem/issues/5) | Google Drive OAuth PKCE (`drive.file`) / OS キーチェーン / SQLite `0004_google_drive.sql` / 階層フォルダ反映 / 同一 ID 更新 / 永続ジョブキュー・指数バックオフ・冪等復旧 / 競合検出・削除検出 UI / MVP 統合検証 | **実装・自動検証完了（実 Google OAuth 保留）** | 通過（Rust `cargo test --lib` **29 テスト**［PKCE/スコープ/バックオフ/ファイル名サニタイズ単体テスト + ローカル Mock Google OAuth/Drive API v3 サーバー統合 E2E（階層作成・同一 ID 更新・`create_new`・`manual_version`・`Retry-After` 429 バックオフ・クラッシュ中断復旧・`appProperties` 冪等・外部編集競合 `overwrite`/`save_as_new`・`REMOTE_DELETED` 再作成・フォルダ削除復旧・ローカル削除非伝播・SQLite/ログ機密非保存・未接続オフライン稼働）+ 大学数学 12 ステップ & 大学物理 3 事例（減衰振動 ODE + 運動方程式次元解析 + ポテンシャルエネルギー曲線）MVP E2E］・clippy/fmt 0 警告；Vitest **5 ファイル 18 テスト**［`Phase4Ui.test.tsx` 含む］・typecheck/lint/build 通過；Python `uv run pytest` **41 テスト**・Ruff 0 警告） | Windows 11 `theorem.exe` デバッグビルド（121.8 MB）および実機起動・既存 DB への `0004_google_drive.sql` 適用・`app_started` ログ確認済。**実 Google アカウント OAuth 接続検証は `GOOGLE_OAUTH_CLIENT_ID` 未設定のため保留**（`test_live_google_drive_oauth_and_same_id_update` で追試可能） |
-| Phase 5 | [#6](https://github.com/sskohei/Theorem/issues/6) | 部分修正・差分承認 / 答案添削 / 全文検索 / 高度物理図 | 未着手 | 未実行 | 未実施 |
+| Phase 5 | [#6](https://github.com/sskohei/Theorem/issues/6) | チャット解答部分修正・差分承認（部分ハンク適用・スコープ隔離）/ バージョン間差分 / 手書き答案認識＆添削（`review`/`concise`/`beginner`）/ 講義資料選択参照 / 複数 AI 並列比較 / Science MCP 高度物理図 6 ツール（FBD・回路・電磁場・波動・ポテンシャル・軌跡）/ SQLite FTS5 (`trigram`) 全文検索 / 学習ステータス・お気に入り / 問題×解答 PDF 並置表示 | **実装・自動検証完了** | 通過（Python `uv run pytest` **47 テスト・0 警告**・Ruff 0 警告［27 ツール・AST 静的監査含む］；Rust `cargo test --lib` **36 テスト**［Phase 2 レビュー修正統合 + 差分計算/部分適用・拒否無変更・他問題スコープ隔離・大学数学 12 ステップ全手順（ステップ 7 含む）・手書き答案認識/添削・講義資料・複数 AI 比較＆Claude 規約防御・FTS5 日本語横断検索・ローカル実 Science MCP `plot_free_body_diagram` PDF 埋め込み・MiTeX 互換プレリュード単一正本化］・clippy/fmt 0 警告；Vitest **7 ファイル 31 テスト**［`Phase5Ui.test.tsx`・`PdfRecognition.test.tsx` 含む］・typecheck/lint/build 通過） | Windows 11 `theorem.exe` デバッグビルドおよび実機起動・既存 DB への `0005_fts_search_and_study.sql` 適用・`app_started` ログ確認済（実機 Codex での 4 ページ測度論解答 PDF コンパイルも確認済；実 Google OAuth・未導入 Claude Code は継続保留） |
 | Phase 6 | [#7](https://github.com/sskohei/Theorem/issues/7) | インストーラー / クロスプラットフォーム / CI・配布 / 日英対応 | 未着手 | 未実行 | N/A |
 
 ---

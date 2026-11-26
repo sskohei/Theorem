@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { AlertTriangle, CloudUpload, FileUp, Info, X } from "lucide-react";
+import { AlertTriangle, CloudUpload, Columns2, FileUp, Info, Star, X } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { CalculationsTab } from "@/features/verification/CalculationsTab";
@@ -13,7 +13,7 @@ import { useDriveStore } from "@/stores/useDriveStore";
 import { useLayoutStore, type CenterTab } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
 import { useScienceStore } from "@/stores/useScienceStore";
-import type { ApiError, RecognitionMode } from "@/types/ipc";
+import type { ApiError, RecognitionMode, StudyStatus } from "@/types/ipc";
 import { ImageViewer } from "./ImageViewer";
 import { PdfViewer } from "./PdfViewer";
 import { RecognizedProblemsTab } from "./RecognizedProblemsTab";
@@ -27,14 +27,17 @@ interface CenterWorkspaceProps {
 
 export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
   const t = useI18n();
-  const { activeTab, setActiveTab } = useLayoutStore();
+  const { activeTab, splitView, setActiveTab, toggleSplitView } = useLayoutStore();
   const {
     settings,
+    documents,
     duplicateNotice,
     error: libraryError,
     dismissDuplicateNotice,
     clearError,
     selectDocument,
+    toggleFavorite,
+    setDocumentStudyStatus,
   } = useLibraryStore();
   const {
     detail,
@@ -65,6 +68,8 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
   } = useDriveStore();
   const calcBadgeCount = verifications.length + toolExecutions.length;
   const activeDocId = detail?.document.id ?? null;
+  const activeSummary =
+    (activeDocId ? documents.find((d) => d.id === activeDocId) : undefined) ?? detail?.document ?? null;
   const docDriveStatus = activeDocId ? documentStatusById[activeDocId] : undefined;
   const docConflictJob =
     docDriveStatus?.jobs.find((j) => j.status === "conflict") ?? null;
@@ -184,39 +189,84 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
           );
         })}
 
-        {activeDocId && driveConnected && (
+        {activeDocId && activeSummary && (
           <div className="ml-auto flex shrink-0 items-center gap-1.5 pb-1 pr-1">
-            {docConflictJob ? (
-              <Button
-                size="xs"
-                variant="primary"
-                onClick={() => openConflictModal(docConflictJob)}
-              >
-                <AlertTriangle className="h-3 w-3" />
-                <span>Drive 競合を解決</span>
-              </Button>
-            ) : (
-              <Button
-                size="xs"
-                variant="outline"
-                disabled={uploadingDocId === activeDocId}
-                onClick={() =>
-                  void uploadDocumentToDrive({
-                    documentId: activeDocId,
-                    scope: "default",
-                  })
-                }
-              >
-                <CloudUpload className="h-3 w-3" />
-                <span>
-                  {uploadingDocId === activeDocId
-                    ? "投入中..."
-                    : (docDriveStatus?.files.length ?? 0) > 0
-                      ? "Drive 更新"
-                      : "Drive へ保存"}
-                </span>
-              </Button>
-            )}
+            {/* Phase 5: Study Status Quick Switcher */}
+            <select
+              aria-label="学習ステータス"
+              value={activeSummary.studyStatus}
+              onChange={(e) =>
+                void setDocumentStudyStatus(activeDocId, e.target.value as StudyStatus)
+              }
+              className="h-6 rounded border border-slate-300 bg-white px-1.5 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              <option value="unstarted">未着手</option>
+              <option value="in_progress">学習中</option>
+              <option value="solved">解決済</option>
+              <option value="review_needed">要復習</option>
+            </select>
+
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label="お気に入りを切替"
+              title="お気に入り"
+              onClick={() => void toggleFavorite(activeSummary)}
+            >
+              <Star
+                className={cn(
+                  "h-3.5 w-3.5",
+                  activeSummary.isFavorite
+                    ? "fill-amber-400 text-amber-500"
+                    : "text-slate-400",
+                )}
+              />
+            </Button>
+
+            {/* Phase 5: Side-by-Side Split View (Original Problem + Solution PDF) */}
+            <Button
+              size="xs"
+              variant={splitView ? "primary" : "outline"}
+              aria-pressed={splitView}
+              onClick={toggleSplitView}
+              title="元の問題と解答 PDF を左右並置表示"
+            >
+              <Columns2 className="h-3 w-3" />
+              <span>並置表示</span>
+            </Button>
+
+            {driveConnected &&
+              (docConflictJob ? (
+                <Button
+                  size="xs"
+                  variant="primary"
+                  onClick={() => openConflictModal(docConflictJob)}
+                >
+                  <AlertTriangle className="h-3 w-3" />
+                  <span>Drive 競合を解決</span>
+                </Button>
+              ) : (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={uploadingDocId === activeDocId}
+                  onClick={() =>
+                    void uploadDocumentToDrive({
+                      documentId: activeDocId,
+                      scope: "default",
+                    })
+                  }
+                >
+                  <CloudUpload className="h-3 w-3" />
+                  <span>
+                    {uploadingDocId === activeDocId
+                      ? "投入中..."
+                      : (docDriveStatus?.files.length ?? 0) > 0
+                        ? "Drive 更新"
+                        : "Drive へ保存"}
+                  </span>
+                </Button>
+              ))}
           </div>
         )}
       </div>
@@ -282,9 +332,63 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
         </div>
       )}
 
-      {/* Tab Body */}
+      {/* Tab Body (or Side-by-Side Split View: Original Problem + Solution PDF) */}
       <div className="min-h-0 flex-1 overflow-hidden">
-        {activeTab === "original" ? (
+        {splitView && detail ? (
+          <div
+            aria-label="問題・解答並置ビュー"
+            className="grid h-full grid-cols-1 divide-y divide-slate-200 lg:grid-cols-2 lg:divide-x lg:divide-y-0 dark:divide-slate-800"
+          >
+            <div className="flex min-h-0 flex-col overflow-hidden">
+              <div className="border-b border-slate-200 bg-slate-100/80 px-3 py-1 text-[11px] font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                元の問題（{detail.document.title}）
+              </div>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                {loading ? (
+                  <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                    {t.common.loading}
+                  </div>
+                ) : primaryAttachment && primaryBase64 ? (
+                  primaryAttachment.mimeType === "application/pdf" ? (
+                    <PdfViewer
+                      documentId={detail.document.id}
+                      attachment={primaryAttachment}
+                      base64Data={primaryBase64}
+                      hasSavedThumbnail={detail.document.thumbnailAttachmentId !== null}
+                      onRecognize={() =>
+                        void handleRecognize(
+                          croppedPreviewUrl ? "page_range" : settings.defaultRecognitionMode,
+                          pageRangeStart !== 1 || pageRangeEnd !== totalPages,
+                        )
+                      }
+                      recognizing={recognizing || preparing}
+                    />
+                  ) : (
+                    <ImageViewer
+                      attachment={primaryAttachment}
+                      base64Data={primaryBase64}
+                      onRecognizeImage={() => void handleRecognize(settings.defaultRecognitionMode)}
+                      recognizing={recognizing || preparing}
+                    />
+                  )
+                ) : (
+                  <div className="flex h-full items-center justify-center text-xs text-slate-500">
+                    元の問題ファイルがありません
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex min-h-0 flex-col overflow-hidden">
+              <div className="border-b border-slate-200 bg-slate-100/80 px-3 py-1 text-[11px] font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                解答 PDF
+              </div>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <SolutionPdfTab />
+              </div>
+            </div>
+          </div>
+        ) : activeTab === "original" ? (
           loading ? (
             <div className="flex h-full items-center justify-center text-sm text-slate-500">
               {t.common.loading}

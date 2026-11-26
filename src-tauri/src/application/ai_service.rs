@@ -13,7 +13,7 @@ use crate::application::science_service::{
 };
 use crate::database::library_repo::NewAttachmentRecord;
 use crate::database::science_repo::NewVerificationResult;
-use crate::database::{ai_repo, library_repo, science_repo};
+use crate::database::{ai_repo, library_repo, science_repo, study_repo};
 use crate::document::detect_supported_format;
 use crate::domain::{
     AgentProfile, AgentStatus, ChatMessage, Conversation, GenerateSolutionRequest, Problem,
@@ -24,8 +24,9 @@ use crate::domain::{
 use crate::error::{AppError, AppResult};
 use crate::pdf::compiler::{CompilePdfMetadata, PdfCompileFailure, compile_solution_to_pdf};
 use crate::prompts::{
-    build_recognition_prompt, build_solution_prompt, extract_json_value, recognition_schema_json,
-    solution_schema_json, validate_recognition_json, validate_solution_json,
+    build_recognition_prompt, build_solution_prompt, extract_json_value,
+    format_untrusted_references, recognition_schema_json, solution_schema_json,
+    validate_recognition_json, validate_solution_json,
 };
 use crate::security::{keyring, redact_secrets};
 use crate::storage::sha256_hex;
@@ -121,7 +122,7 @@ impl AppState {
             .map_err(|e| AppError::Agent(e.to_string()))
     }
 
-    async fn resolve_profile_for_purpose(
+    pub(crate) async fn resolve_profile_for_purpose(
         &self,
         purpose: &str,
         override_profile_id: Option<&str>,
@@ -620,12 +621,33 @@ impl AppState {
             .resolve_profile_for_purpose(effective_purpose, req.agent_profile_id.as_deref())
             .await?;
 
+        let selected_refs = {
+            let db = self.db.read().await;
+            study_repo::get_reference_materials_by_ids(db.pool(), &req.reference_material_ids)
+                .await?
+        };
+
+        let mut attempt_images: Vec<AgentImageInput> = Vec::new();
+        for img in &req.user_attempt_images {
+            let bytes = STANDARD.decode(img.base64_data.trim()).map_err(|_| {
+                AppError::Validation("答案画像の Base64 デコードに失敗しました".into())
+            })?;
+            let fmt = detect_supported_format(&bytes, &img.filename)?;
+            attempt_images.push(AgentImageInput {
+                filename: img.filename.clone(),
+                mime_type: fmt.mime_type().to_string(),
+                bytes,
+            });
+        }
+
         let prompt_text = build_solution_prompt(
             &doc_detail.document.title,
             &target_problems,
             &req.mode,
             &settings.prompts,
             req.repair_feedback.as_deref(),
+            &selected_refs,
+            req.user_attempt_markdown.as_deref(),
         );
 
         let run_id = Uuid::new_v4().to_string();
@@ -665,7 +687,7 @@ impl AppState {
                 explicit_api_key,
                 &run_id,
                 prompt_text,
-                Vec::new(),
+                attempt_images,
                 chosen_model.clone(),
                 Some(solution_schema_json()),
                 Some(&settings.science_mcp),
@@ -1424,6 +1446,16 @@ impl AppState {
                     "[現在の解答 v{}]\n```json\n{}\n```\n\n",
                     cur.version_number, snippet
                 ));
+            }
+            if !req.reference_material_ids.is_empty()
+                && let Ok(refs) = study_repo::get_reference_materials_by_ids(
+                    db.pool(),
+                    &req.reference_material_ids,
+                )
+                .await
+            {
+                ctx.push_str(&format_untrusted_references(&refs));
+                ctx.push('\n');
             }
             (msgs, sess, ctx)
         };

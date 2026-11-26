@@ -1,4 +1,4 @@
-"""MCP stdio server exposing 21 safe math, physics, unit, and visualization tools.
+"""MCP stdio server exposing 27 safe math, physics, unit, visualization, and diagram tools.
 
 NEVER exposes any generic Python execution tool (such as `run_python`).
 Output artifacts are confined strictly to the server-startup artifacts directory.
@@ -316,6 +316,144 @@ def create_server(
             y_range=y_range,
             grid_size=grid_size,
             title=title,
+            output_format=output_format,
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 5 Advanced Physics Diagram Tools (6)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(annotations=_PLOT_ARTIFACT_ANNOTATIONS)
+    async def plot_free_body_diagram(
+        forces: list[dict[str, Any]],
+        body_label: str = "m",
+        incline_deg: float = 0.0,
+        show_components: bool = False,
+        show_net_force: bool = True,
+        title: str | None = None,
+        output_format: str | None = None,
+    ) -> dict[str, Any]:
+        """Draw a free-body / force-vector diagram with net force equilibrium check."""
+        return await _run(
+            "plot_free_body_diagram",
+            forces=forces,
+            body_label=body_label,
+            incline_deg=incline_deg,
+            show_components=show_components,
+            show_net_force=show_net_force,
+            title=title,
+            output_format=output_format,
+        )
+
+    @mcp.tool(annotations=_PLOT_ARTIFACT_ANNOTATIONS)
+    async def plot_circuit_diagram(
+        elements: list[dict[str, Any]],
+        topology: str = "series",
+        current_label: str | None = "I",
+        title: str | None = None,
+        output_format: str | None = None,
+    ) -> dict[str, Any]:
+        """Draw a DC / RC / RL / RLC schematic circuit diagram (series or parallel)."""
+        return await _run(
+            "plot_circuit_diagram",
+            elements=elements,
+            topology=topology,
+            current_label=current_label,
+            title=title,
+            output_format=output_format,
+        )
+
+    @mcp.tool(annotations=_PLOT_ARTIFACT_ANNOTATIONS)
+    async def plot_field_lines(
+        sources: list[dict[str, Any]],
+        field_kind: str = "electric",
+        x_range: list[float | int] | None = None,
+        y_range: list[float | int] | None = None,
+        show_equipotentials: bool = True,
+        title: str | None = None,
+        output_format: str | None = None,
+    ) -> dict[str, Any]:
+        """Plot 2D electric field lines (+ equipotentials) or magnetic field lines."""
+        return await _run(
+            "plot_field_lines",
+            sources=sources,
+            field_kind=field_kind,
+            x_range=x_range,
+            y_range=y_range,
+            show_equipotentials=show_equipotentials,
+            title=title,
+            output_format=output_format,
+        )
+
+    @mcp.tool(annotations=_PLOT_ARTIFACT_ANNOTATIONS)
+    async def plot_wave(
+        waves: list[dict[str, Any]],
+        x_range: list[float | int] | None = None,
+        t: float = 0.0,
+        show_superposition: bool = True,
+        show_envelope: bool = False,
+        title: str | None = None,
+        output_format: str | None = None,
+    ) -> dict[str, Any]:
+        """Plot harmonic waves, interference, beats, and standing wave superposition."""
+        return await _run(
+            "plot_wave",
+            waves=waves,
+            x_range=x_range,
+            t=t,
+            show_superposition=show_superposition,
+            show_envelope=show_envelope,
+            title=title,
+            output_format=output_format,
+        )
+
+    @mcp.tool(annotations=_PLOT_ARTIFACT_ANNOTATIONS)
+    async def plot_potential_energy(
+        expression: str,
+        variable: str = "x",
+        x_range: list[float | int] | None = None,
+        energy_levels: list[float | int] | None = None,
+        labels: list[str] | None = None,
+        title: str | None = None,
+        output_format: str | None = None,
+    ) -> dict[str, Any]:
+        """Plot a potential energy curve U(x) with energy levels and turning points."""
+        return await _run(
+            "plot_potential_energy",
+            expression=expression,
+            variable=variable,
+            x_range=x_range,
+            energy_levels=energy_levels,
+            labels=labels,
+            title=title,
+            output_format=output_format,
+        )
+
+    @mcp.tool(annotations=_PLOT_ARTIFACT_ANNOTATIONS)
+    async def plot_trajectory(
+        x_expression: str,
+        y_expression: str,
+        parameter: str = "t",
+        t_range: list[float | int] | None = None,
+        show_velocity_vectors: bool = True,
+        num_vectors: int = 8,
+        title: str | None = None,
+        x_label: str | None = None,
+        y_label: str | None = None,
+        output_format: str | None = None,
+    ) -> dict[str, Any]:
+        """Plot a 2D motion trajectory (x(t), y(t)) with symbolic velocity vectors."""
+        return await _run(
+            "plot_trajectory",
+            x_expression=x_expression,
+            y_expression=y_expression,
+            parameter=parameter,
+            t_range=t_range,
+            show_velocity_vectors=show_velocity_vectors,
+            num_vectors=num_vectors,
+            title=title,
+            x_label=x_label,
+            y_label=y_label,
             output_format=output_format,
         )
 

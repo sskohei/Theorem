@@ -717,6 +717,11 @@ pub async fn list_documents(
             {
                 return None;
             }
+            if let Some(ref status) = filter.study_status
+                && &doc.study_status != status
+            {
+                return None;
+            }
             if filter.favorites_only && !doc.is_favorite {
                 return None;
             }
@@ -793,6 +798,7 @@ pub async fn get_document_detail(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn update_document(
     pool: &Pool<Sqlite>,
     id: &str,
@@ -801,6 +807,7 @@ pub async fn update_document(
     folder_id: Option<Option<&str>>,
     is_favorite: Option<bool>,
     recognition_mode: Option<&str>,
+    study_status: Option<&str>,
 ) -> AppResult<DocumentDetail> {
     let existing = get_document_detail(pool, id).await?;
     let new_title = match title {
@@ -852,18 +859,30 @@ pub async fn update_document(
         }
         None => existing.document.recognition_mode,
     };
+    let new_study_status = match study_status {
+        Some(st) => {
+            if !matches!(st, "unstarted" | "in_progress" | "solved" | "review_needed") {
+                return Err(AppError::Validation(format!(
+                    "不正な学習ステータスです: {st}"
+                )));
+            }
+            st.to_string()
+        }
+        None => existing.document.study_status,
+    };
 
     let ts = now_iso();
     sqlx::query(
         "UPDATE documents
-         SET title = ?1, subject_id = ?2, folder_id = ?3, is_favorite = ?4, recognition_mode = ?5, updated_at = ?6
-         WHERE id = ?7",
+         SET title = ?1, subject_id = ?2, folder_id = ?3, is_favorite = ?4, recognition_mode = ?5, study_status = ?6, updated_at = ?7
+         WHERE id = ?8",
     )
     .bind(&new_title)
     .bind(&new_subject)
     .bind(&new_folder)
     .bind(if new_fav { 1 } else { 0 })
     .bind(&new_mode)
+    .bind(&new_study_status)
     .bind(&ts)
     .bind(id)
     .execute(pool)

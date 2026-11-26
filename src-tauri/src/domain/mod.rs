@@ -86,6 +86,8 @@ pub struct DocumentFilter {
     pub folder_id: Option<String>,
     pub tag_id: Option<String>,
     pub search_query: Option<String>,
+    #[serde(default)]
+    pub study_status: Option<String>,
     pub favorites_only: bool,
     pub recent_only: bool,
 }
@@ -101,6 +103,7 @@ pub struct UpdateDocumentRequest {
     pub clear_folder: bool,
     pub is_favorite: Option<bool>,
     pub recognition_mode: Option<String>,
+    pub study_status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -462,6 +465,12 @@ pub struct GenerateSolutionRequest {
     pub page_range_end: Option<i64>,
     pub repair_feedback: Option<String>,
     pub parent_solution_id: Option<String>,
+    #[serde(default)]
+    pub reference_material_ids: Vec<String>,
+    #[serde(default)]
+    pub user_attempt_markdown: Option<String>,
+    #[serde(default)]
+    pub user_attempt_images: Vec<ChatImageUpload>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -498,6 +507,10 @@ pub struct ChatMessage {
     pub agent_run_id: Option<String>,
     pub referenced_problem_id: Option<String>,
     pub attachment_ids: Vec<String>,
+    #[serde(default)]
+    pub revision_patch: Option<SolutionRevisionProposal>,
+    #[serde(default)]
+    pub revision_status: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -518,6 +531,8 @@ pub struct SendChatMessageRequest {
     pub include_solution_context: bool,
     #[serde(default)]
     pub attached_images: Vec<ChatImageUpload>,
+    #[serde(default)]
+    pub reference_material_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -962,4 +977,168 @@ pub struct ResolveDriveConflictRequest {
     pub job_id: String,
     /// `"overwrite"` | `"save_as_new"` | `"recreate_after_remote_delete"` | `"cancel"`
     pub resolution: String,
+}
+
+// ============================================================================
+// Phase 5: Partial Revision & Diff Approval, Reference Materials,
+//          Multi-Agent Comparison & SQLite FTS5 Cross-Entity Full-Text Search
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SolutionDiffHunk {
+    pub hunk_id: String,
+    pub field_path: String,
+    pub label: String,
+    /// `"added"` | `"modified"` | `"removed"`
+    pub change_kind: String,
+    pub before_json: Option<serde_json::Value>,
+    pub after_json: Option<serde_json::Value>,
+    pub before_summary: String,
+    pub after_summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SolutionRevisionProposal {
+    pub base_solution_id: String,
+    pub base_version_number: i64,
+    pub target_problem_id: Option<String>,
+    pub summary: String,
+    pub proposed_json: String,
+    pub hunks: Vec<SolutionDiffHunk>,
+    #[serde(default)]
+    pub applied_solution_id: Option<String>,
+    #[serde(default)]
+    pub applied_version_number: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SolutionVersionDiff {
+    pub base_solution_id: String,
+    pub base_version_number: i64,
+    pub target_solution_id: String,
+    pub target_version_number: i64,
+    pub hunks: Vec<SolutionDiffHunk>,
+    pub added_count: usize,
+    pub modified_count: usize,
+    pub removed_count: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposeSolutionRevisionRequest {
+    pub conversation_id: String,
+    pub document_id: String,
+    pub base_solution_id: String,
+    pub instruction: String,
+    pub agent_profile_id: Option<String>,
+    pub model_name: Option<String>,
+    #[serde(default)]
+    pub reference_material_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecideSolutionRevisionRequest {
+    pub message_id: String,
+    /// `"approve"` | `"reject"`
+    pub decision: String,
+    /// Optional subset of hunk IDs to apply; when None on approve, applies all hunks.
+    pub approved_hunk_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecideSolutionRevisionResult {
+    pub message: ChatMessage,
+    pub new_solution: Option<SolutionOperationResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferenceMaterial {
+    pub id: String,
+    pub subject_id: Option<String>,
+    pub document_id: Option<String>,
+    pub title: String,
+    /// `"lecture_note"` | `"textbook_excerpt"` | `"formula_sheet"` | `"handwritten_attempt"`
+    pub kind: String,
+    pub content_markdown: String,
+    pub attachment_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateReferenceMaterialRequest {
+    pub subject_id: Option<String>,
+    pub document_id: Option<String>,
+    pub title: String,
+    pub kind: String,
+    pub content_markdown: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareAgentsRequest {
+    pub document_id: String,
+    pub problem_id: Option<String>,
+    pub mode: String,
+    pub profile_ids: Vec<String>,
+    #[serde(default)]
+    pub reference_material_ids: Vec<String>,
+    #[serde(default)]
+    pub user_attempt_markdown: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentComparisonEntry {
+    pub profile_id: String,
+    pub profile_name: String,
+    pub provider_kind: String,
+    pub model_name: Option<String>,
+    pub solution_result: Option<SolutionOperationResult>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareAgentsResult {
+    pub entries: Vec<AgentComparisonEntry>,
+    pub diff_between_first_two: Option<SolutionVersionDiff>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FullTextSearchRequest {
+    pub query: String,
+    #[serde(default)]
+    pub subject_id: Option<String>,
+    #[serde(default)]
+    pub study_status: Option<String>,
+    #[serde(default)]
+    pub favorites_only: bool,
+    /// Empty means search all: `"document"`, `"problem"`, `"solution"`, `"message"`, `"reference"`.
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FullTextSearchHit {
+    /// `"document"` | `"problem"` | `"solution"` | `"message"` | `"reference"`
+    pub entity_type: String,
+    pub entity_id: String,
+    pub document_id: Option<String>,
+    pub document_title: String,
+    pub title: String,
+    pub snippet: String,
+    pub study_status: Option<String>,
+    pub is_favorite: bool,
 }

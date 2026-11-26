@@ -1,8 +1,8 @@
 # Science MCP Server 仕様書（Science MCP）
 
-> **ステータス**: Implemented v1.1（Phase 3 実装・ローカル自動テスト・実機 Codex 連携検証済み）
+> **ステータス**: Implemented v1.2（Phase 3 全 21 ツール + Phase 5 高度物理図 6 ツール＝計 27 ツール実装・ローカル自動テスト 47 件合格・実機 Codex 連携検証済み）
 > **実装言語・環境**: Python 3.11+（`uv` + `pyproject.toml` + `uv.lock`） / MCP Python SDK v2（`mcp.server.mcpserver.MCPServer`）
-> **最終更新**: 2026-11-26
+> **最終更新**: 2026-11-27
 
 ---
 
@@ -43,7 +43,7 @@ flowchart LR
 
 ---
 
-## 3. 提供ツール一覧（全 21 ツール）
+## 3. 提供ツール一覧（全 27 ツール）
 
 ### 3.1 MVP 優先ツール（Phase 3 初期実装）
 
@@ -75,6 +75,17 @@ flowchart LR
 | 数値計算 | `numerical_evaluate` | 高精度数値評価（任意精度/浮動小数） |
 | 可視化 | `plot_data` | 測定・数値データの散布図/折れ線グラフ |
 | 可視化 | `plot_vector_field` | 2D ベクトル場（電場・速度場等）の可視化 |
+
+### 3.3 高度な物理図ツール（Phase 5 追加・6 ツール）
+
+| カテゴリ | ツール名 | 内容 |
+|---|---|---|
+| 力学・図解 | `plot_free_body_diagram` | 力のベクトル図・自由物体図（斜面・成分分解・合力と静的つり合い検証） |
+| 電磁気・回路 | `plot_circuit_diagram` | DC / RC / RL / RLC 電気回路図（直列・並列の概略回路記号描画） |
+| 電磁気・場 | `plot_field_lines` | 電場（電気力線＋等電位線）および直線電流による磁力線の 2D 可視化 |
+| 波動・光学 | `plot_wave` | 正弦波・重ね合わせ・うなり包絡線・定常波の可視化 |
+| 力学・量子 | `plot_potential_energy` | ポテンシャルエネルギー曲線 $U(x)$・エネルギー準位・古典的許容領域・転回点検出 |
+| 力学・運動 | `plot_trajectory` | パラメトリック運動軌跡 $(x(t), y(t))$ と記号微分による速度ベクトル描画 |
 
 ---
 

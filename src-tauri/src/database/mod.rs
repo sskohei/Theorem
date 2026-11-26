@@ -2,6 +2,7 @@ pub mod ai_repo;
 pub mod drive_repo;
 pub mod library_repo;
 pub mod science_repo;
+pub mod study_repo;
 
 use std::path::Path;
 use std::time::Duration;

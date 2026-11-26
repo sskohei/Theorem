@@ -34,6 +34,13 @@ EXPECTED_TOOLS: set[str] = {
     "numerical_evaluate",
     "plot_data",
     "plot_vector_field",
+    # 6 Phase 5 advanced physics diagram tools
+    "plot_free_body_diagram",
+    "plot_circuit_diagram",
+    "plot_field_lines",
+    "plot_wave",
+    "plot_potential_energy",
+    "plot_trajectory",
 }
 
 

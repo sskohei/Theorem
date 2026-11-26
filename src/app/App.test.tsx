@@ -47,6 +47,7 @@ vi.mock("@/services/tauriClient", async (importOriginal) => {
       getDriveOverview: vi.fn(),
       listDocumentDriveStatus: vi.fn(),
       setFolderAutoUpload: vi.fn(),
+      listReferenceMaterials: vi.fn(),
     },
   };
 });
@@ -297,6 +298,7 @@ describe("Theorem App Shell & Stores", () => {
       files: [],
       jobs: [],
     });
+    vi.mocked(tauriClient.listReferenceMaterials).mockResolvedValue([]);
   });
 
   it("renders 3-column workspace, subjects, folders, document list, and image viewer", async () => {

@@ -10,7 +10,12 @@ import type {
   BackupInfo,
   BootstrapState,
   ChatMessage,
+  CompareAgentsRequest,
+  CompareAgentsResult,
   Conversation,
+  CreateReferenceMaterialRequest,
+  DecideSolutionRevisionRequest,
+  DecideSolutionRevisionResult,
   DocumentDetail,
   DocumentDriveStatus,
   DocumentFilter,
@@ -22,14 +27,18 @@ import type {
   EnqueueDriveUploadRequest,
   EnqueueDriveUploadResult,
   Folder,
+  FullTextSearchHit,
+  FullTextSearchRequest,
   GenerateSolutionRequest,
   ImportBatchResult,
   ImportedDocumentItem,
   PermissionDecision,
   Problem,
+  ProposeSolutionRevisionRequest,
   RecognitionMode,
   RecognizeProblemsRequest,
   RecognizeProblemsResult,
+  ReferenceMaterial,
   ResolveDriveConflictRequest,
   RunScienceToolRequest,
   RunScienceToolResult,
@@ -42,7 +51,9 @@ import type {
   Solution,
   SolutionArtifactItem,
   SolutionOperationResult,
+  SolutionVersionDiff,
   StorageStats,
+  StudyStatus,
   Subject,
   SubjectCategory,
   Tag,
@@ -169,6 +180,7 @@ export const tauriClient = {
     folderId?: string | null;
     isFavorite?: boolean;
     recognitionMode?: RecognitionMode;
+    studyStatus?: StudyStatus;
   }): Promise<DocumentDetail> {
     const clearFolder = "folderId" in params && params.folderId === null;
     return callCommand<DocumentDetail>("update_document", {
@@ -180,6 +192,7 @@ export const tauriClient = {
         clearFolder,
         isFavorite: params.isFavorite ?? null,
         recognitionMode: params.recognitionMode ?? null,
+        studyStatus: params.studyStatus ?? null,
       },
     });
   },
@@ -420,6 +433,52 @@ export const tauriClient = {
   },
   processDriveQueueNow(): Promise<number> {
     return callCommand<number>("process_drive_queue_now");
+  },
+
+  // Phase 5: Partial Revision & Diff Approval, Reference Materials,
+  //          Multi-Agent Comparison & Full-Text Search
+  proposeSolutionRevision(
+    input: ProposeSolutionRevisionRequest,
+  ): Promise<SendChatMessageResult> {
+    return callCommand<SendChatMessageResult>("propose_solution_revision", { input });
+  },
+  decideSolutionRevision(
+    input: DecideSolutionRevisionRequest,
+  ): Promise<DecideSolutionRevisionResult> {
+    return callCommand<DecideSolutionRevisionResult>("decide_solution_revision", { input });
+  },
+  compareSolutionVersions(
+    baseSolutionId: string,
+    targetSolutionId: string,
+  ): Promise<SolutionVersionDiff> {
+    return callCommand<SolutionVersionDiff>("compare_solution_versions", {
+      baseSolutionId,
+      targetSolutionId,
+    });
+  },
+  compareAgentsGenerateSolutions(input: CompareAgentsRequest): Promise<CompareAgentsResult> {
+    return callCommand<CompareAgentsResult>("compare_agents_generate_solutions", { input });
+  },
+  listReferenceMaterials(
+    documentId?: string | null,
+    subjectId?: string | null,
+  ): Promise<ReferenceMaterial[]> {
+    return callCommand<ReferenceMaterial[]>("list_reference_materials", {
+      documentId: documentId ?? null,
+      subjectId: subjectId ?? null,
+    });
+  },
+  createReferenceMaterial(input: CreateReferenceMaterialRequest): Promise<ReferenceMaterial> {
+    return callCommand<ReferenceMaterial>("create_reference_material", { input });
+  },
+  deleteReferenceMaterial(id: string): Promise<void> {
+    return callCommand<void>("delete_reference_material", { id });
+  },
+  fullTextSearch(input: FullTextSearchRequest): Promise<FullTextSearchHit[]> {
+    return callCommand<FullTextSearchHit[]>("full_text_search", { input });
+  },
+  rebuildSearchIndex(): Promise<number> {
+    return callCommand<number>("rebuild_search_index");
   },
 
   // Native Dialogs

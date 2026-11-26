@@ -651,6 +651,9 @@ async fn test_phase4_drive_full_lifecycle_conflicts_recovery_and_non_deletion() 
             page_range_end: None,
             repair_feedback: None,
             parent_solution_id: None,
+            reference_material_ids: vec![],
+            user_attempt_markdown: None,
+            user_attempt_images: vec![],
         })
         .await
         .expect("sol v1");
@@ -1262,6 +1265,9 @@ async fn test_mvp_math_12_steps_and_physics_3_cases_e2e() {
             page_range_end: None,
             repair_feedback: None,
             parent_solution_id: None,
+            reference_material_ids: vec![],
+            user_attempt_markdown: None,
+            user_attempt_images: vec![],
         })
         .await
         .expect("step 4-5 generate");
@@ -1291,6 +1297,7 @@ async fn test_mvp_math_12_steps_and_physics_3_cases_e2e() {
             include_problem_context: true,
             include_solution_context: true,
             attached_images: vec![],
+            reference_material_ids: vec![],
         })
         .await
         .expect("step 6 chat");
@@ -1316,22 +1323,36 @@ async fn test_mvp_math_12_steps_and_physics_3_cases_e2e() {
         .expect("v1 mapping")
         .drive_file_id;
 
-    // Step 7 & 8: Non-destructive v2 revision & PDF regeneration
-    let mut parsed_sol: serde_json::Value =
-        serde_json::from_str(&sol_v1.solution.structured_json).expect("json");
-    parsed_sol["title"] = serde_json::Value::String("ガウス積分（極座標ヤコビアン補足版）".into());
-    let sol_v2 = state
-        .save_solution_edit(&SaveSolutionEditRequest {
+    // Step 7 & 8: Chat-driven partial revision proposal + explicit diff approval -> non-destructive v2 & PDF regeneration
+    let rev_proposal = state
+        .propose_solution_revision(&crate::domain::ProposeSolutionRevisionRequest {
+            conversation_id: conv.id.clone(),
             document_id: math_doc_id.clone(),
-            problem_id: Some(edited_prob.id.clone()),
-            parent_solution_id: Some(sol_v1.solution.id.clone()),
-            mode: "detailed".to_string(),
-            structured_json: serde_json::to_string_pretty(&parsed_sol).expect("pretty"),
-            change_summary: Some("ヤコビアン補足".to_string()),
+            base_solution_id: sol_v1.solution.id.clone(),
+            instruction: "ヤコビアン r の厳密な説明を追記してください".to_string(),
+            agent_profile_id: Some(mock_profile.id.clone()),
+            model_name: None,
+            reference_material_ids: vec![],
         })
         .await
-        .expect("step 7-8 v2");
+        .expect("step 7 propose revision");
+    assert_eq!(
+        rev_proposal.assistant_message.revision_status.as_deref(),
+        Some("pending")
+    );
+    let rev_approved = state
+        .decide_solution_revision(&crate::domain::DecideSolutionRevisionRequest {
+            message_id: rev_proposal.assistant_message.id.clone(),
+            decision: "approve".to_string(),
+            approved_hunk_ids: None,
+        })
+        .await
+        .expect("step 7-8 approve revision");
+    let sol_v2 = rev_approved
+        .new_solution
+        .expect("step 8 approved v2 solution");
     assert_eq!(sol_v2.solution.version_number, 2);
+    assert!(sol_v2.solution.pdf_attachment_id.is_some());
 
     // Step 10: Re-upload updates the EXACT SAME Google Drive file ID!
     state
@@ -1400,6 +1421,9 @@ async fn test_mvp_math_12_steps_and_physics_3_cases_e2e() {
             page_range_end: None,
             repair_feedback: None,
             parent_solution_id: None,
+            reference_material_ids: vec![],
+            user_attempt_markdown: None,
+            user_attempt_images: vec![],
         })
         .await
         .expect("phys sol");
@@ -1484,7 +1508,12 @@ async fn test_mvp_math_12_steps_and_physics_3_cases_e2e() {
             .len(),
         2
     );
-    assert_eq!(restarted.list_messages(&conv.id).await.expect("m").len(), 2);
+    let persisted_msgs = restarted.list_messages(&conv.id).await.expect("m");
+    assert_eq!(persisted_msgs.len(), 4);
+    assert_eq!(
+        persisted_msgs[3].revision_status.as_deref(),
+        Some("approved")
+    );
     let persisted_drive = restarted
         .list_document_drive_status(&math_doc_id)
         .await

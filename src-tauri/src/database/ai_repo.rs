@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::domain::{
     AgentProfile, ChatMessage, Conversation, Problem, SaveAgentProfileRequest, Solution,
-    UpsertProblemRequest,
+    SolutionRevisionProposal, UpsertProblemRequest,
 };
 use crate::error::{AppError, AppResult};
 use crate::security::keyring;
@@ -776,7 +776,7 @@ pub async fn list_messages(
 ) -> AppResult<Vec<ChatMessage>> {
     let rows = sqlx::query(
         "SELECT id, conversation_id, role, content_markdown, status, agent_run_id,
-                referenced_problem_id, created_at, updated_at
+                referenced_problem_id, revision_patch_json, revision_status, created_at, updated_at
          FROM messages
          WHERE conversation_id = ?1
          ORDER BY created_at ASC, rowid ASC",
@@ -809,6 +809,9 @@ pub async fn list_messages(
         .map(|r| {
             let id: String = r.get("id");
             let attachment_ids = att_map.remove(&id).unwrap_or_default();
+            let rev_raw: Option<String> = r.get("revision_patch_json");
+            let revision_patch =
+                rev_raw.and_then(|s| serde_json::from_str::<SolutionRevisionProposal>(&s).ok());
             ChatMessage {
                 id,
                 conversation_id: r.get("conversation_id"),
@@ -818,11 +821,55 @@ pub async fn list_messages(
                 agent_run_id: r.get("agent_run_id"),
                 referenced_problem_id: r.get("referenced_problem_id"),
                 attachment_ids,
+                revision_patch,
+                revision_status: r.get("revision_status"),
                 created_at: r.get("created_at"),
                 updated_at: r.get("updated_at"),
             }
         })
         .collect())
+}
+
+pub async fn get_message(pool: &Pool<Sqlite>, message_id: &str) -> AppResult<ChatMessage> {
+    let r = sqlx::query(
+        "SELECT id, conversation_id, role, content_markdown, status, agent_run_id,
+                referenced_problem_id, revision_patch_json, revision_status, created_at, updated_at
+         FROM messages
+         WHERE id = ?1",
+    )
+    .bind(message_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("対象メッセージが見つかりません".into()))?;
+
+    let att_rows = sqlx::query(
+        "SELECT attachment_id FROM message_attachments WHERE message_id = ?1 ORDER BY created_at ASC",
+    )
+    .bind(message_id)
+    .fetch_all(pool)
+    .await?;
+    let attachment_ids = att_rows
+        .into_iter()
+        .map(|ar| ar.get("attachment_id"))
+        .collect();
+    let rev_raw: Option<String> = r.get("revision_patch_json");
+    let revision_patch =
+        rev_raw.and_then(|s| serde_json::from_str::<SolutionRevisionProposal>(&s).ok());
+
+    Ok(ChatMessage {
+        id: r.get("id"),
+        conversation_id: r.get("conversation_id"),
+        role: r.get("role"),
+        content_markdown: r.get("content_markdown"),
+        status: r.get("status"),
+        agent_run_id: r.get("agent_run_id"),
+        referenced_problem_id: r.get("referenced_problem_id"),
+        attachment_ids,
+        revision_patch,
+        revision_status: r.get("revision_status"),
+        created_at: r.get("created_at"),
+        updated_at: r.get("updated_at"),
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -885,6 +932,8 @@ pub async fn insert_message(
         agent_run_id: agent_run_id.map(ToString::to_string),
         referenced_problem_id: referenced_problem_id.map(ToString::to_string),
         attachment_ids: attachment_ids.to_vec(),
+        revision_patch: None,
+        revision_status: None,
         created_at: ts.clone(),
         updated_at: ts,
     })
@@ -907,6 +956,34 @@ pub async fn update_message_content(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+pub async fn update_message_revision(
+    pool: &Pool<Sqlite>,
+    message_id: &str,
+    proposal: &SolutionRevisionProposal,
+    revision_status: &str,
+) -> AppResult<ChatMessage> {
+    if !matches!(revision_status, "pending" | "approved" | "rejected") {
+        return Err(AppError::Validation(format!(
+            "不正な修正提案ステータスです: {revision_status}"
+        )));
+    }
+    let patch_json =
+        serde_json::to_string(proposal).map_err(|e| AppError::Database(e.to_string()))?;
+    let ts = now_iso();
+    sqlx::query(
+        "UPDATE messages
+         SET revision_patch_json = ?1, revision_status = ?2, updated_at = ?3
+         WHERE id = ?4",
+    )
+    .bind(&patch_json)
+    .bind(revision_status)
+    .bind(&ts)
+    .bind(message_id)
+    .execute(pool)
+    .await?;
+    get_message(pool, message_id).await
 }
 
 // ============================================================================

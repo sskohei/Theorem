@@ -120,6 +120,15 @@ pub fn run() {
             commands::cancel_drive_job,
             commands::resolve_drive_conflict,
             commands::process_drive_queue_now,
+            commands::propose_solution_revision,
+            commands::decide_solution_revision,
+            commands::compare_solution_versions,
+            commands::compare_agents_generate_solutions,
+            commands::list_reference_materials,
+            commands::create_reference_material,
+            commands::delete_reference_material,
+            commands::full_text_search,
+            commands::rebuild_search_index,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

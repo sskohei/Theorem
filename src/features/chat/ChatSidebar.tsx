@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  FileDiff,
   ImagePlus,
   Loader2,
   MessageSquare,
@@ -26,7 +27,9 @@ import { useAgentStore } from "@/stores/useAgentStore";
 import { useAiWorkspaceStore } from "@/stores/useAiWorkspaceStore";
 import { useChatStore } from "@/stores/useChatStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
+import { useStudyStore } from "@/stores/useStudyStore";
 import type { ChatImageUpload } from "@/types/ipc";
+import { RevisionDiffCard } from "./RevisionDiffCard";
 
 export function ChatSidebar() {
   const { selectedDocumentId, settings } = useLibraryStore();
@@ -54,12 +57,15 @@ export function ChatSidebar() {
     setIncludeProblemContext,
     setIncludeSolutionContext,
     sendMessage,
+    proposeRevision,
     cancelActiveRun,
     respondPermission,
     clearError,
   } = useChatStore();
+  const { references, selectedReferenceIds, toggleReferenceSelection } = useStudyStore();
 
   const [inputText, setInputText] = useState("");
+  const [revisionMode, setRevisionMode] = useState(false);
   const [attachedImages, setAttachedImages] = useState<ChatImageUpload[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedToolIds, setExpandedToolIds] = useState<Record<string, boolean>>({});
@@ -88,11 +94,23 @@ export function ChatSidebar() {
     setInputText("");
     setAttachedImages([]);
 
+    if (revisionMode && currentSolution) {
+      await proposeRevision({
+        documentId: selectedDocumentId,
+        baseSolutionId: currentSolution.id,
+        instruction: textToSend,
+        referenceMaterialIds: selectedReferenceIds,
+      });
+      setRevisionMode(false);
+      return;
+    }
+
     await sendMessage({
       documentId: selectedDocumentId,
       contentMarkdown: textToSend,
       referencedProblemId: activeProblem?.id ?? null,
       attachedImages: imgsToSend,
+      referenceMaterialIds: selectedReferenceIds,
     });
   };
 
@@ -291,6 +309,28 @@ export function ChatSidebar() {
           />
           <span>解答{currentSolution ? `(v${currentSolution.versionNumber})` : ""}</span>
         </label>
+        {references.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1 pt-0.5">
+            {references.map((r) => {
+              const active = selectedReferenceIds.includes(r.id);
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => toggleReferenceSelection(r.id)}
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-[10px] border transition-colors",
+                    active
+                      ? "border-blue-500 bg-blue-100 text-blue-900 dark:bg-blue-900/60 dark:text-blue-100"
+                      : "border-slate-300 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300",
+                  )}
+                >
+                  資料: {r.title}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Chat Error Banner */}
@@ -368,6 +408,7 @@ export function ChatSidebar() {
                   </div>
                 </div>
                 <MarkdownMath content={msg.contentMarkdown} />
+                {msg.revisionPatch && <RevisionDiffCard message={msg} />}
               </div>
             );
           })
@@ -558,6 +599,18 @@ export function ChatSidebar() {
               <ImagePlus className="h-3.5 w-3.5" />
               <span>画像添付</span>
             </Button>
+            {currentSolution && (
+              <Button
+                size="xs"
+                variant={revisionMode ? "primary" : "outline"}
+                disabled={!selectedDocumentId || sending}
+                onClick={() => setRevisionMode((v) => !v)}
+                title="現行解答に対する部分修正の差分提案を作成（承認するまで適用されません）"
+              >
+                <FileDiff className="h-3.5 w-3.5" />
+                <span>{revisionMode ? "部分修正モード ON" : "解答の部分修正"}</span>
+              </Button>
+            )}
           </div>
 
           {sendingHere ? (
@@ -569,11 +622,15 @@ export function ChatSidebar() {
             <Button
               size="xs"
               variant="primary"
-              disabled={!selectedDocumentId || sending || (!inputText.trim() && attachedImages.length === 0)}
+              disabled={
+                !selectedDocumentId ||
+                sending ||
+                (!inputText.trim() && (revisionMode || attachedImages.length === 0))
+              }
               onClick={() => void handleSend()}
             >
               <Send className="h-3.5 w-3.5" />
-              <span>送信</span>
+              <span>{revisionMode ? "修正案を作成" : "送信"}</span>
             </Button>
           )}
         </div>

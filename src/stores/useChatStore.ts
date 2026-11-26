@@ -67,7 +67,19 @@ interface ChatStoreState {
     contentMarkdown: string;
     referencedProblemId?: string | null;
     attachedImages?: ChatImageUpload[];
+    referenceMaterialIds?: string[];
   }) => Promise<void>;
+  proposeRevision: (params: {
+    documentId: string;
+    baseSolutionId: string;
+    instruction: string;
+    referenceMaterialIds?: string[];
+  }) => Promise<void>;
+  decideRevision: (params: {
+    messageId: string;
+    decision: "approve" | "reject";
+    approvedHunkIds?: string[] | null;
+  }) => Promise<boolean>;
   cancelActiveRun: () => Promise<void>;
   respondPermission: (
     runId: string,
@@ -223,7 +235,13 @@ export const useChatStore = create<ChatStoreState>((set, get) => {
     setIncludeProblemContext: (include) => set({ includeProblemContext: include }),
     setIncludeSolutionContext: (include) => set({ includeSolutionContext: include }),
 
-    sendMessage: async ({ documentId, contentMarkdown, referencedProblemId, attachedImages = [] }) => {
+    sendMessage: async ({
+      documentId,
+      contentMarkdown,
+      referencedProblemId,
+      attachedImages = [],
+      referenceMaterialIds = [],
+    }) => {
       const state = get();
       if (run || state.activeDocumentId !== documentId) return;
 
@@ -231,7 +249,8 @@ export const useChatStore = create<ChatStoreState>((set, get) => {
         id: crypto.randomUUID(),
         documentId,
         conversationId: state.activeConversationId,
-        streamingText: "",        liveToolCalls: [],
+        streamingText: "",
+        liveToolCalls: [],
         permissions: [],
         error: null,
       };
@@ -257,6 +276,8 @@ export const useChatStore = create<ChatStoreState>((set, get) => {
           agentRunId: null,
           referencedProblemId: referencedProblemId ?? null,
           attachmentIds: [],
+          revisionPatch: null,
+          revisionStatus: null,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -279,6 +300,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => {
             includeProblemContext: state.includeProblemContext,
             includeSolutionContext: state.includeSolutionContext,
             attachedImages,
+            referenceMaterialIds,
           });
         } catch (err) {
           target.error ??= normalizeApiError(err);
@@ -300,6 +322,97 @@ export const useChatStore = create<ChatStoreState>((set, get) => {
         if (visible) {
           set({ ...visibleRun(), liveToolCalls: target.liveToolCalls, error: target.error ?? get().error });
         }
+      }
+    },
+
+    proposeRevision: async ({
+      documentId,
+      baseSolutionId,
+      instruction,
+      referenceMaterialIds = [],
+    }) => {
+      const state = get();
+      if (run || state.activeDocumentId !== documentId) return;
+
+      const target: ChatRun = {
+        id: crypto.randomUUID(),
+        documentId,
+        conversationId: state.activeConversationId,
+        streamingText: "",
+        liveToolCalls: [],
+        permissions: [],
+        error: null,
+      };
+      run = target;
+      set({ sending: true, activeRunId: target.id, ...visibleRun() });
+
+      try {
+        let conversationId = target.conversationId;
+        if (!conversationId) {
+          const created = await get().createNewConversation(
+            documentId,
+            `修正提案: ${instruction.trim().slice(0, 20)}`,
+            null,
+            baseSolutionId,
+          );
+          if (!created) return;
+          conversationId = created.id;
+          target.conversationId = conversationId;
+        }
+
+        try {
+          await tauriClient.proposeSolutionRevision({
+            conversationId,
+            documentId,
+            baseSolutionId,
+            instruction,
+            agentProfileId: state.selectedProfileId,
+            modelName: state.selectedModel,
+            referenceMaterialIds,
+          });
+        } catch (err) {
+          target.error ??= normalizeApiError(err);
+        }
+
+        if (isVisible(target)) {
+          await refreshMessages(conversationId, selection);
+        }
+      } finally {
+        const visible = isVisible(target);
+        run = null;
+        set({ sending: false, activeRunId: null });
+        if (visible) {
+          set({ ...visibleRun(), liveToolCalls: target.liveToolCalls, error: target.error ?? get().error });
+        }
+      }
+    },
+
+    decideRevision: async ({ messageId, decision, approvedHunkIds }) => {
+      if (run) return false;
+      const currentSelection = selection;
+      set({ sending: true, error: null });
+      try {
+        const res = await tauriClient.decideSolutionRevision({
+          messageId,
+          decision,
+          approvedHunkIds: approvedHunkIds ?? null,
+        });
+        if (currentSelection === selection) {
+          set((s) => ({
+            sending: false,
+            messages: s.messages.map((m) => (m.id === messageId ? res.message : m)),
+          }));
+        } else {
+          set({ sending: false });
+        }
+        return res.newSolution !== null;
+      } catch (err) {
+        if (currentSelection === selection) {
+          set({ sending: false, error: normalizeApiError(err) });
+        } else {
+          set({ sending: false });
+        }
+        return false;
       }
     },
 

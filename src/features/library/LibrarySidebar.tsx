@@ -28,7 +28,14 @@ import { cn } from "@/lib/utils";
 import { useDriveStore } from "@/stores/useDriveStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
-import type { DocumentSummary, Folder, Subject, SubjectCategory } from "@/types/ipc";
+import type {
+  DocumentSummary,
+  Folder,
+  FullTextSearchHit,
+  StudyStatus,
+  Subject,
+  SubjectCategory,
+} from "@/types/ipc";
 
 interface LibrarySidebarProps {
   searchInputRef: RefObject<HTMLInputElement | null>;
@@ -53,6 +60,7 @@ function collectDescendantFolderIds(folders: Folder[], rootId: string): Set<stri
 export function LibrarySidebar({ searchInputRef, onImportClick }: LibrarySidebarProps) {
   const t = useI18n();
   const openSettings = useLayoutStore((s) => s.openSettings);
+  const setActiveTab = useLayoutStore((s) => s.setActiveTab);
   const {
     subjects,
     folders,
@@ -62,14 +70,20 @@ export function LibrarySidebar({ searchInputRef, onImportClick }: LibrarySidebar
     selectedSubjectId,
     selectedFolderId,
     selectedTagId,
+    selectedStudyStatus,
     searchQuery,
+    ftsHits,
+    ftsLoading,
     selectedDocumentId,
     importing,
     setQuickView,
     selectSubjectFilter,
     selectFolderFilter,
     selectTagFilter,
+    setStudyStatusFilter,
     setSearchQuery,
+    runFullTextSearch,
+    clearFullTextSearch,
     selectDocument,
     createSubject,
     updateSubject,
@@ -421,17 +435,94 @@ export function LibrarySidebar({ searchInputRef, onImportClick }: LibrarySidebar
           {importing ? t.common.loading : t.library.addProblem}
         </Button>
 
-        <div className="relative">
+        <div className="relative flex gap-1">
           <Search className="pointer-events-none absolute top-2 left-2.5 h-3.5 w-3.5 text-slate-400" />
           <Input
             ref={searchInputRef}
             value={searchQuery}
-            onChange={(e) => void setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              void setSearchQuery(v);
+              if (!v.trim()) clearFullTextSearch();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && searchQuery.trim()) {
+                void runFullTextSearch(searchQuery);
+              }
+            }}
             placeholder={t.header.searchPlaceholder}
             aria-label={t.header.searchPlaceholder}
             className="pl-8"
           />
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={!searchQuery.trim() || ftsLoading}
+            onClick={() => void runFullTextSearch(searchQuery)}
+            title="問題文・解答・会話・資料を横断全文検索 (SQLite FTS5)"
+          >
+            {ftsLoading ? "..." : "全文"}
+          </Button>
         </div>
+
+        {/* Phase 5: SQLite FTS5 Cross-Entity Full-Text Search Results */}
+        {ftsHits.length > 0 && (
+          <div
+            aria-label="全文検索結果"
+            className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-blue-200 bg-white p-2 text-[11px] shadow-xs dark:border-blue-900 dark:bg-slate-900"
+          >
+            <div className="flex items-center justify-between text-[10px] font-semibold text-blue-700 dark:text-blue-300">
+              <span>横断全文検索ヒット ({ftsHits.length} 件)</span>
+              <button
+                type="button"
+                onClick={clearFullTextSearch}
+                className="text-slate-400 hover:text-slate-700"
+              >
+                閉じる
+              </button>
+            </div>
+            {ftsHits.map((hit: FullTextSearchHit) => {
+              const scopeLabel: Record<string, string> = {
+                document: "文書",
+                problem: "問題文",
+                solution: "解答",
+                message: "会話",
+                reference: "講義資料",
+              };
+              return (
+                <button
+                  key={`${hit.entityType}-${hit.entityId}`}
+                  type="button"
+                  onClick={() => {
+                    if (hit.documentId) {
+                      selectDocument(hit.documentId);
+                      if (hit.entityType === "problem" || hit.entityType === "reference") {
+                        setActiveTab("recognized");
+                      } else if (hit.entityType === "solution") {
+                        setActiveTab("solutionPdf");
+                      } else {
+                        setActiveTab("original");
+                      }
+                    }
+                  }}
+                  className="block w-full rounded border border-slate-100 p-1.5 text-left hover:bg-blue-50 dark:border-slate-800 dark:hover:bg-blue-950/50"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant="info" className="px-1 py-0 text-[9px]">
+                      {scopeLabel[hit.entityType] ?? hit.entityType}
+                    </Badge>
+                    <span className="truncate font-medium text-slate-900 dark:text-slate-100">
+                      {hit.documentTitle}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 line-clamp-2 text-[10px] text-slate-600 dark:text-slate-400">
+                    {hit.snippet}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <p className="text-[11px] text-slate-500 dark:text-slate-400">{t.library.pasteHint}</p>
       </div>
@@ -479,6 +570,35 @@ export function LibrarySidebar({ searchInputRef, onImportClick }: LibrarySidebar
             <Clock className="h-3.5 w-3.5 text-sky-500" />
             <span>{t.library.recent}</span>
           </button>
+
+          {/* Phase 5: Study Status Filter Pills */}
+          <div className="flex flex-wrap gap-1 px-1 pt-1.5" aria-label="学習ステータスフィルタ">
+            {(
+              [
+                ["unstarted", "未着手"],
+                ["in_progress", "学習中"],
+                ["solved", "解決済"],
+                ["review_needed", "要復習"],
+              ] as [StudyStatus, string][]
+            ).map(([st, lbl]) => {
+              const active = selectedStudyStatus === st;
+              return (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => void setStudyStatusFilter(st)}
+                  className={cn(
+                    "rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors",
+                    active
+                      ? "border-blue-500 bg-blue-600 text-white"
+                      : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300",
+                  )}
+                >
+                  {lbl}
+                </button>
+              );
+            })}
+          </div>
         </nav>
 
         {/* Subjects & Hierarchical Folders */}
@@ -801,6 +921,20 @@ export function LibrarySidebar({ searchInputRef, onImportClick }: LibrarySidebar
                             )}
                             <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
                               <span>{doc.sourceType.toUpperCase()}</span>
+                              {(() => {
+                                const stMap: Record<string, { label: string; variant: "default" | "info" | "warning" | "outline" }> = {
+                                  unstarted: { label: "未着手", variant: "outline" },
+                                  in_progress: { label: "学習中", variant: "info" },
+                                  solved: { label: "解決済", variant: "default" },
+                                  review_needed: { label: "要復習", variant: "warning" },
+                                };
+                                const item = stMap[doc.studyStatus];
+                                return item ? (
+                                  <Badge variant={item.variant} className="px-1 py-0 text-[9px]">
+                                    {item.label}
+                                  </Badge>
+                                ) : null;
+                              })()}
                               {doc.pageCount ? (
                                 <span>
                                   {doc.pageCount} {t.library.pagesUnit}

@@ -3,6 +3,9 @@ pub mod drive_service;
 #[cfg(test)]
 mod drive_tests;
 pub mod science_service;
+pub mod study_service;
+#[cfg(test)]
+mod study_tests;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -204,6 +207,7 @@ impl AppState {
         library_repo::get_document_detail(db.pool(), document_id).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_document(
         &self,
         id: &str,
@@ -212,6 +216,7 @@ impl AppState {
         folder_id: Option<Option<&str>>,
         is_favorite: Option<bool>,
         recognition_mode: Option<&str>,
+        study_status: Option<&str>,
     ) -> AppResult<DocumentDetail> {
         let db = self.db.read().await;
         library_repo::update_document(
@@ -222,6 +227,7 @@ impl AppState {
             folder_id,
             is_favorite,
             recognition_mode,
+            study_status,
         )
         .await
     }
@@ -700,7 +706,7 @@ mod tests {
 
         // Rename title to something distinct from filename to verify metadata search
         state
-            .update_document(&doc_id, Some("第3回演習問題"), None, None, None, None)
+            .update_document(&doc_id, Some("第3回演習問題"), None, None, None, None, None)
             .await
             .expect("rename");
         let tag = state.create_tag("期末対策", None).await.expect("tag");
@@ -741,6 +747,7 @@ mod tests {
                     Some(Some(&f_root_b.id)),
                     None,
                     None,
+                    None,
                 )
                 .await
                 .is_err()
@@ -753,6 +760,7 @@ mod tests {
                 None,
                 Some(&phys_id),
                 Some(Some(&f_phys.id)),
+                None,
                 None,
                 None,
             )
@@ -933,6 +941,9 @@ mod tests {
                 page_range_end: None,
                 repair_feedback: None,
                 parent_solution_id: None,
+                reference_material_ids: Vec::new(),
+                user_attempt_markdown: None,
+                user_attempt_images: Vec::new(),
             })
             .await
             .expect("generate solution");
@@ -1073,6 +1084,7 @@ mod tests {
                 include_problem_context: true,
                 include_solution_context: true,
                 attached_images: Vec::new(),
+                reference_material_ids: Vec::new(),
             })
             .await
             .expect("chat turn 1");
@@ -1097,6 +1109,7 @@ mod tests {
                 include_problem_context: false,
                 include_solution_context: false,
                 attached_images: Vec::new(),
+                reference_material_ids: Vec::new(),
             })
             .await
             .expect("chat turn 2");
@@ -1136,6 +1149,7 @@ mod tests {
                 include_problem_context: false,
                 include_solution_context: false,
                 attached_images: Vec::new(),
+                reference_material_ids: Vec::new(),
             })
             .await
             .expect("permission turn");
@@ -1257,6 +1271,9 @@ mod tests {
                 page_range_end: None,
                 repair_feedback: None,
                 parent_solution_id: None,
+                reference_material_ids: Vec::new(),
+                user_attempt_markdown: None,
+                user_attempt_images: Vec::new(),
             })
             .await
             .expect("live solution");
@@ -1299,6 +1316,7 @@ mod tests {
                 include_problem_context: true,
                 include_solution_context: true,
                 attached_images: Vec::new(),
+                reference_material_ids: Vec::new(),
             })
             .await
             .expect("live chat");
@@ -1334,7 +1352,7 @@ mod tests {
             .expect("mock profile")
             .clone();
 
-        // 1. Live probe of local Python Science MCP Server (21 tools, zero generic python exec)
+        // 1. Live probe of local Python Science MCP Server (27 tools, zero generic python exec)
         let mcp_status = state
             .check_science_mcp_status()
             .await
@@ -1344,7 +1362,7 @@ mod tests {
             "Science MCP must be ready: {:?}",
             mcp_status.detail_note
         );
-        assert_eq!(mcp_status.tool_count, 21);
+        assert_eq!(mcp_status.tool_count, 27);
         assert!(
             !mcp_status
                 .tools
@@ -1418,6 +1436,9 @@ mod tests {
                 page_range_end: None,
                 repair_feedback: None,
                 parent_solution_id: None,
+                reference_material_ids: Vec::new(),
+                user_attempt_markdown: None,
+                user_attempt_images: Vec::new(),
             })
             .await
             .expect("generate spoof solution");
@@ -1446,6 +1467,9 @@ mod tests {
                 page_range_end: None,
                 repair_feedback: None,
                 parent_solution_id: None,
+                reference_material_ids: Vec::new(),
+                user_attempt_markdown: None,
+                user_attempt_images: Vec::new(),
             })
             .await
             .expect("generate verified physics solution");
@@ -1677,6 +1701,9 @@ mod tests {
                 page_range_end: None,
                 repair_feedback: None,
                 parent_solution_id: None,
+                reference_material_ids: Vec::new(),
+                user_attempt_markdown: None,
+                user_attempt_images: Vec::new(),
             })
             .await
             .expect("live codex verified solution");

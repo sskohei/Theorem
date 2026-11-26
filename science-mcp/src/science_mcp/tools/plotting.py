@@ -39,6 +39,15 @@ from science_mcp.models import (
 )
 from science_mcp.parser import parse_safe_expression, validate_identifier
 
+plt.rcParams["font.sans-serif"] = [
+    "Yu Gothic",
+    "BIZ UDGothic",
+    "Meiryo",
+    "Noto Sans CJK JP",
+    "DejaVu Sans",
+]
+plt.rcParams["axes.unicode_minus"] = False
+
 _NUMPY_UNARY_FUNCS: dict[str, Any] = {
     "sin": np.sin,
     "cos": np.cos,

@@ -159,7 +159,8 @@ export const ja = {
       version: "バージョン",
       license: "ライセンス",
       status: "開発フェーズ",
-      statusValue: "MVP 完成（Phase 4：Google Drive 連携・永続ジョブキュー・競合検出）",
+      statusValue:
+        "Phase 5（高度な学習機能：部分修正・差分承認・答案添削・講義資料参照・複数 AI 比較・高度物理図・FTS5 全文検索・並置表示）",
     },
     upcomingNotice: "この設定カテゴリは後続フェーズで有効化されます。",
   },

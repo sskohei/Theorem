@@ -5,6 +5,7 @@ export type RecognitionMode =
   | "include_handwriting"
   | "page_range"
   | "handwritten_answer";
+export type StudyStatus = "unstarted" | "in_progress" | "solved" | "review_needed";
 
 export interface ApiError {
   code: string;
@@ -85,6 +86,7 @@ export interface DocumentFilter {
   folderId: string | null;
   tagId: string | null;
   searchQuery: string | null;
+  studyStatus?: StudyStatus | null;
   favoritesOnly: boolean;
   recentOnly: boolean;
 }
@@ -323,6 +325,9 @@ export interface GenerateSolutionRequest {
   pageRangeEnd?: number | null;
   repairFeedback?: string | null;
   parentSolutionId?: string | null;
+  referenceMaterialIds?: string[];
+  userAttemptMarkdown?: string | null;
+  userAttemptImages?: ChatImageUpload[];
 }
 
 export interface SaveSolutionEditRequest {
@@ -353,6 +358,8 @@ export interface ChatMessage {
   agentRunId: string | null;
   referencedProblemId: string | null;
   attachmentIds: string[];
+  revisionPatch?: SolutionRevisionProposal | null;
+  revisionStatus?: "pending" | "approved" | "rejected" | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -374,6 +381,7 @@ export interface SendChatMessageRequest {
   includeProblemContext: boolean;
   includeSolutionContext: boolean;
   attachedImages: ChatImageUpload[];
+  referenceMaterialIds?: string[];
 }
 
 export interface SendChatMessageResult {
@@ -737,4 +745,134 @@ export interface EnqueueDriveUploadResult {
 export interface ResolveDriveConflictRequest {
   jobId: string;
   resolution: DriveConflictResolution;
+}
+
+// ============================================================================
+// Phase 5: Partial Revision & Diff Approval, Reference Materials,
+//          Multi-Agent Comparison & SQLite FTS5 Cross-Entity Full-Text Search
+// ============================================================================
+
+export type ReferenceMaterialKind =
+  | "lecture_note"
+  | "textbook_excerpt"
+  | "formula_sheet"
+  | "handwritten_attempt";
+
+export interface SolutionDiffHunk {
+  hunkId: string;
+  fieldPath: string;
+  label: string;
+  changeKind: "added" | "modified" | "removed";
+  beforeJson: unknown;
+  afterJson: unknown;
+  beforeSummary: string;
+  afterSummary: string;
+}
+
+export interface SolutionRevisionProposal {
+  baseSolutionId: string;
+  baseVersionNumber: number;
+  targetProblemId: string | null;
+  summary: string;
+  proposedJson: string;
+  hunks: SolutionDiffHunk[];
+  appliedSolutionId?: string | null;
+  appliedVersionNumber?: number | null;
+}
+
+export interface SolutionVersionDiff {
+  baseSolutionId: string;
+  baseVersionNumber: number;
+  targetSolutionId: string;
+  targetVersionNumber: number;
+  hunks: SolutionDiffHunk[];
+  addedCount: number;
+  modifiedCount: number;
+  removedCount: number;
+}
+
+export interface ProposeSolutionRevisionRequest {
+  conversationId: string;
+  documentId: string;
+  baseSolutionId: string;
+  instruction: string;
+  agentProfileId?: string | null;
+  modelName?: string | null;
+  referenceMaterialIds?: string[];
+}
+
+export interface DecideSolutionRevisionRequest {
+  messageId: string;
+  decision: "approve" | "reject";
+  approvedHunkIds?: string[] | null;
+}
+
+export interface DecideSolutionRevisionResult {
+  message: ChatMessage;
+  newSolution: SolutionOperationResult | null;
+}
+
+export interface ReferenceMaterial {
+  id: string;
+  subjectId: string | null;
+  documentId: string | null;
+  title: string;
+  kind: ReferenceMaterialKind;
+  contentMarkdown: string;
+  attachmentId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateReferenceMaterialRequest {
+  subjectId?: string | null;
+  documentId?: string | null;
+  title: string;
+  kind: ReferenceMaterialKind;
+  contentMarkdown: string;
+}
+
+export interface CompareAgentsRequest {
+  documentId: string;
+  problemId?: string | null;
+  mode: SolutionMode;
+  profileIds: string[];
+  referenceMaterialIds?: string[];
+  userAttemptMarkdown?: string | null;
+}
+
+export interface AgentComparisonEntry {
+  profileId: string;
+  profileName: string;
+  providerKind: string;
+  modelName: string | null;
+  solutionResult: SolutionOperationResult | null;
+  error: string | null;
+}
+
+export interface CompareAgentsResult {
+  entries: AgentComparisonEntry[];
+  diffBetweenFirstTwo: SolutionVersionDiff | null;
+}
+
+export type FullTextEntityScope = "document" | "problem" | "solution" | "message" | "reference";
+
+export interface FullTextSearchRequest {
+  query: string;
+  subjectId?: string | null;
+  studyStatus?: StudyStatus | null;
+  favoritesOnly?: boolean;
+  scopes?: FullTextEntityScope[];
+  limit?: number;
+}
+
+export interface FullTextSearchHit {
+  entityType: FullTextEntityScope;
+  entityId: string;
+  documentId: string | null;
+  documentTitle: string;
+  title: string;
+  snippet: string;
+  studyStatus: string | null;
+  isFavorite: boolean;
 }

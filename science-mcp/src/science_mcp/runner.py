@@ -21,7 +21,19 @@ from science_mcp.models import (
 )
 
 # Tools that require the fixed session artifacts_dir & default_format injected by the server.
-_PLOTTING_TOOLS: frozenset[str] = frozenset({"plot_function", "plot_data", "plot_vector_field"})
+_PLOTTING_TOOLS: frozenset[str] = frozenset(
+    {
+        "plot_function",
+        "plot_data",
+        "plot_vector_field",
+        "plot_free_body_diagram",
+        "plot_circuit_diagram",
+        "plot_field_lines",
+        "plot_wave",
+        "plot_potential_energy",
+        "plot_trajectory",
+    }
+)
 
 
 def _resolve_tool_callable(tool_name: str) -> Callable[..., dict[str, Any]]:
@@ -69,6 +81,18 @@ def _resolve_tool_callable(tool_name: str) -> Callable[..., dict[str, Any]]:
         from science_mcp.tools import plotting
 
         return getattr(plotting, tool_name)
+
+    if tool_name in {
+        "plot_free_body_diagram",
+        "plot_circuit_diagram",
+        "plot_field_lines",
+        "plot_wave",
+        "plot_potential_energy",
+        "plot_trajectory",
+    }:
+        from science_mcp.tools import physics_diagrams
+
+        return getattr(physics_diagrams, tool_name)
 
     raise ScienceMcpError("UNKNOWN_TOOL", f"未登録のツールです: {tool_name}")
 

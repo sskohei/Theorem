@@ -4,14 +4,17 @@ use crate::agents::adapter::PermissionDecision;
 use crate::application::AppState;
 use crate::domain::{
     AgentProfile, AgentStatus, AppSettings, AttachmentBinaryResponse, AttachmentInfo, BackupInfo,
-    BootstrapState, ChatMessage, Conversation, DocumentDetail, DocumentDriveStatus, DocumentFilter,
-    DocumentSummary, DriveConnection, DriveOAuthConfigStatus, DriveOverview, DriveUploadJob,
-    EnqueueDriveUploadRequest, EnqueueDriveUploadResult, Folder, GenerateSolutionRequest,
-    ImportBatchResult, ImportedDocumentItem, Problem, RecognizeProblemsRequest,
-    RecognizeProblemsResult, ResolveDriveConflictRequest, RunScienceToolRequest,
-    RunScienceToolResult, SaveAgentProfileRequest, SaveDriveOAuthConfigRequest,
-    SaveSolutionEditRequest, ScienceMcpStatus, SendChatMessageRequest, SendChatMessageResult,
-    Solution, SolutionArtifactItem, SolutionOperationResult, StorageStats, Subject, Tag,
+    BootstrapState, ChatMessage, CompareAgentsRequest, CompareAgentsResult, Conversation,
+    CreateReferenceMaterialRequest, DecideSolutionRevisionRequest, DecideSolutionRevisionResult,
+    DocumentDetail, DocumentDriveStatus, DocumentFilter, DocumentSummary, DriveConnection,
+    DriveOAuthConfigStatus, DriveOverview, DriveUploadJob, EnqueueDriveUploadRequest,
+    EnqueueDriveUploadResult, Folder, FullTextSearchHit, FullTextSearchRequest,
+    GenerateSolutionRequest, ImportBatchResult, ImportedDocumentItem, Problem,
+    ProposeSolutionRevisionRequest, RecognizeProblemsRequest, RecognizeProblemsResult,
+    ReferenceMaterial, ResolveDriveConflictRequest, RunScienceToolRequest, RunScienceToolResult,
+    SaveAgentProfileRequest, SaveDriveOAuthConfigRequest, SaveSolutionEditRequest,
+    ScienceMcpStatus, SendChatMessageRequest, SendChatMessageResult, Solution,
+    SolutionArtifactItem, SolutionOperationResult, SolutionVersionDiff, StorageStats, Subject, Tag,
     ToolExecutionRecord, UpdateDocumentRequest, UpdateDriveSettingsRequest, UpsertProblemRequest,
     VerificationResultRecord,
 };
@@ -166,6 +169,7 @@ pub async fn update_document(
             folder_ref,
             input.is_favorite,
             input.recognition_mode.as_deref(),
+            input.study_status.as_deref(),
         )
         .await
         .map_err(ApiError::from)
@@ -755,4 +759,101 @@ pub async fn process_drive_queue_now(state: State<'_, AppState>) -> Result<usize
         .process_drive_queue_once()
         .await
         .map_err(ApiError::from)
+}
+
+// ============================================================================
+// Phase 5: Partial Revision & Diff Approval, Reference Materials,
+//          Multi-Agent Comparison & Full-Text Search Commands
+// ============================================================================
+
+#[tauri::command]
+pub async fn propose_solution_revision(
+    state: State<'_, AppState>,
+    input: ProposeSolutionRevisionRequest,
+) -> Result<SendChatMessageResult, ApiError> {
+    state
+        .propose_solution_revision(&input)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn decide_solution_revision(
+    state: State<'_, AppState>,
+    input: DecideSolutionRevisionRequest,
+) -> Result<DecideSolutionRevisionResult, ApiError> {
+    state
+        .decide_solution_revision(&input)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn compare_solution_versions(
+    state: State<'_, AppState>,
+    base_solution_id: String,
+    target_solution_id: String,
+) -> Result<SolutionVersionDiff, ApiError> {
+    state
+        .compare_solution_versions(&base_solution_id, &target_solution_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn compare_agents_generate_solutions(
+    state: State<'_, AppState>,
+    input: CompareAgentsRequest,
+) -> Result<CompareAgentsResult, ApiError> {
+    state
+        .compare_agents_generate_solutions(&input)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn list_reference_materials(
+    state: State<'_, AppState>,
+    document_id: Option<String>,
+    subject_id: Option<String>,
+) -> Result<Vec<ReferenceMaterial>, ApiError> {
+    state
+        .list_reference_materials(document_id.as_deref(), subject_id.as_deref())
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn create_reference_material(
+    state: State<'_, AppState>,
+    input: CreateReferenceMaterialRequest,
+) -> Result<ReferenceMaterial, ApiError> {
+    state
+        .create_reference_material(&input)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn delete_reference_material(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), ApiError> {
+    state
+        .delete_reference_material(&id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn full_text_search(
+    state: State<'_, AppState>,
+    input: FullTextSearchRequest,
+) -> Result<Vec<FullTextSearchHit>, ApiError> {
+    state.full_text_search(&input).await.map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn rebuild_search_index(state: State<'_, AppState>) -> Result<usize, ApiError> {
+    state.rebuild_search_index().await.map_err(ApiError::from)
 }

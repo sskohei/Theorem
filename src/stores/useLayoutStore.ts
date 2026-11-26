@@ -28,6 +28,7 @@ interface LayoutState {
   leftSidebarWidth: number;
   rightSidebarWidth: number;
   activeTab: CenterTab;
+  splitView: boolean;
   theme: ThemePreference;
   settingsOpen: boolean;
   settingsCategory: SettingsCategory;
@@ -40,6 +41,8 @@ interface LayoutState {
   setRightSidebarWidth: (width: number) => void;
   resetSidebarWidths: () => void;
   setActiveTab: (tab: CenterTab) => void;
+  setSplitView: (enabled: boolean) => void;
+  toggleSplitView: () => void;
   setTheme: (theme: ThemePreference) => void;
   openSettings: (category?: SettingsCategory) => void;
   closeSettings: () => void;
@@ -57,6 +60,7 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   leftSidebarWidth: 280,
   rightSidebarWidth: 320,
   activeTab: "original",
+  splitView: false,
   theme: "system",
   settingsOpen: false,
   settingsCategory: "general",
@@ -70,7 +74,9 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   setRightSidebarWidth: (width) =>
     set({ rightSidebarWidth: Math.min(MAX_RIGHT, Math.max(MIN_RIGHT, Math.round(width))) }),
   resetSidebarWidths: () => set({ leftSidebarWidth: 280, rightSidebarWidth: 320 }),
-  setActiveTab: (tab) => set({ activeTab: tab }),
+  setActiveTab: (tab) => set({ activeTab: tab, splitView: false }),
+  setSplitView: (enabled) => set({ splitView: enabled }),
+  toggleSplitView: () => set((s) => ({ splitView: !s.splitView })),
   setTheme: (theme) => set({ theme }),
   openSettings: (category) =>
     set((s) => ({

@@ -32,6 +32,7 @@ import { useDriveStore } from "@/stores/useDriveStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
 import { useScienceStore } from "@/stores/useScienceStore";
+import { useStudyStore } from "@/stores/useStudyStore";
 import type { AgentEventEnvelope } from "@/types/ipc";
 
 export function App() {
@@ -64,6 +65,7 @@ export function App() {
   const { loadForDocument: loadChatForDocument, handleAgentEvent } = useChatStore();
   const { loadForDocument: loadScienceForDocument, loadForSolution: loadScienceForSolution } =
     useScienceStore();
+  const { loadReferences } = useStudyStore();
   const {
     overview: driveOverview,
     loadOverview: loadDriveOverview,
@@ -88,6 +90,7 @@ export function App() {
     void loadChatForDocument(selectedDocumentId);
     void loadScienceForDocument(selectedDocumentId);
     void loadDriveDocumentStatus(selectedDocumentId);
+    void loadReferences(selectedDocumentId);
   }, [
     selectedDocumentId,
     loadDocument,
@@ -95,6 +98,7 @@ export function App() {
     loadChatForDocument,
     loadScienceForDocument,
     loadDriveDocumentStatus,
+    loadReferences,
   ]);
 
   useEffect(() => {
@@ -337,7 +341,7 @@ export function App() {
             {t.appName}
           </span>
           <Badge variant="info" className="hidden sm:inline-flex">
-            MVP (Phase 4)
+            Phase 5
           </Badge>
         </div>
 
