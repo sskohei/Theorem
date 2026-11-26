@@ -4,12 +4,15 @@ use crate::agents::adapter::PermissionDecision;
 use crate::application::AppState;
 use crate::domain::{
     AgentProfile, AgentStatus, AppSettings, AttachmentBinaryResponse, AttachmentInfo, BackupInfo,
-    BootstrapState, ChatMessage, Conversation, DocumentDetail, DocumentFilter, DocumentSummary,
-    Folder, GenerateSolutionRequest, ImportBatchResult, ImportedDocumentItem, Problem,
-    RecognizeProblemsRequest, RecognizeProblemsResult, RunScienceToolRequest, RunScienceToolResult,
-    SaveAgentProfileRequest, SaveSolutionEditRequest, ScienceMcpStatus, SendChatMessageRequest,
-    SendChatMessageResult, Solution, SolutionArtifactItem, SolutionOperationResult, StorageStats,
-    Subject, Tag, ToolExecutionRecord, UpdateDocumentRequest, UpsertProblemRequest,
+    BootstrapState, ChatMessage, Conversation, DocumentDetail, DocumentDriveStatus, DocumentFilter,
+    DocumentSummary, DriveConnection, DriveOAuthConfigStatus, DriveOverview, DriveUploadJob,
+    EnqueueDriveUploadRequest, EnqueueDriveUploadResult, Folder, GenerateSolutionRequest,
+    ImportBatchResult, ImportedDocumentItem, Problem, RecognizeProblemsRequest,
+    RecognizeProblemsResult, ResolveDriveConflictRequest, RunScienceToolRequest,
+    RunScienceToolResult, SaveAgentProfileRequest, SaveDriveOAuthConfigRequest,
+    SaveSolutionEditRequest, ScienceMcpStatus, SendChatMessageRequest, SendChatMessageResult,
+    Solution, SolutionArtifactItem, SolutionOperationResult, StorageStats, Subject, Tag,
+    ToolExecutionRecord, UpdateDocumentRequest, UpdateDriveSettingsRequest, UpsertProblemRequest,
     VerificationResultRecord,
 };
 use crate::error::ApiError;
@@ -635,6 +638,121 @@ pub async fn attach_artifact_to_solution(
 ) -> Result<SolutionOperationResult, ApiError> {
     state
         .attach_artifact_to_solution(&solution_id, &attachment_id, caption.as_deref())
+        .await
+        .map_err(ApiError::from)
+}
+
+// ============================================================================
+// Phase 4: Google Drive Export, OAuth PKCE & Persistent Job Queue
+// ============================================================================
+
+#[tauri::command]
+pub async fn get_drive_overview(state: State<'_, AppState>) -> Result<DriveOverview, ApiError> {
+    state.get_drive_overview().await.map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn save_drive_oauth_config(
+    state: State<'_, AppState>,
+    input: SaveDriveOAuthConfigRequest,
+) -> Result<DriveOAuthConfigStatus, ApiError> {
+    state
+        .save_drive_oauth_config(&input)
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn connect_google_drive(state: State<'_, AppState>) -> Result<DriveConnection, ApiError> {
+    state.connect_google_drive().await.map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn disconnect_google_drive(state: State<'_, AppState>) -> Result<(), ApiError> {
+    state
+        .disconnect_google_drive()
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn update_drive_settings(
+    state: State<'_, AppState>,
+    input: UpdateDriveSettingsRequest,
+) -> Result<DriveConnection, ApiError> {
+    state
+        .update_drive_settings(&input)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn set_folder_auto_upload(
+    state: State<'_, AppState>,
+    folder_id: String,
+    auto_upload_drive: bool,
+) -> Result<Folder, ApiError> {
+    state
+        .set_folder_auto_upload(&folder_id, auto_upload_drive)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn upload_document_to_drive(
+    state: State<'_, AppState>,
+    input: EnqueueDriveUploadRequest,
+) -> Result<EnqueueDriveUploadResult, ApiError> {
+    state
+        .enqueue_document_drive_upload(&input)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn list_document_drive_status(
+    state: State<'_, AppState>,
+    document_id: String,
+) -> Result<DocumentDriveStatus, ApiError> {
+    state
+        .list_document_drive_status(&document_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn retry_drive_job(
+    state: State<'_, AppState>,
+    job_id: String,
+) -> Result<DriveUploadJob, ApiError> {
+    state.retry_drive_job(&job_id).await.map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn cancel_drive_job(
+    state: State<'_, AppState>,
+    job_id: String,
+) -> Result<DriveUploadJob, ApiError> {
+    state
+        .cancel_drive_job(&job_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn resolve_drive_conflict(
+    state: State<'_, AppState>,
+    input: ResolveDriveConflictRequest,
+) -> Result<DriveUploadJob, ApiError> {
+    state
+        .resolve_drive_conflict(&input)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn process_drive_queue_now(state: State<'_, AppState>) -> Result<usize, ApiError> {
+    state
+        .process_drive_queue_once()
         .await
         .map_err(ApiError::from)
 }

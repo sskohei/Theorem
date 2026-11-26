@@ -229,6 +229,14 @@ impl Default for ScienceMcpSettings {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveAppSettings {
+    /// Non-secret Desktop App OAuth Client ID (client secret and tokens are NEVER stored here).
+    #[serde(default)]
+    pub oauth_client_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -248,6 +256,8 @@ pub struct AppSettings {
     pub prompts: PromptSettings,
     #[serde(default)]
     pub science_mcp: ScienceMcpSettings,
+    #[serde(default)]
+    pub drive: DriveAppSettings,
 }
 
 impl Default for AppSettings {
@@ -264,6 +274,7 @@ impl Default for AppSettings {
             agent_assignments: AgentPurposeAssignments::default(),
             prompts: PromptSettings::default(),
             science_mcp: ScienceMcpSettings::default(),
+            drive: DriveAppSettings::default(),
         }
     }
 }
@@ -782,4 +793,172 @@ pub struct RunScienceToolResult {
     pub verification: Option<VerificationResultRecord>,
     pub created_artifacts: Vec<AttachmentInfo>,
     pub updated_solution: Option<SolutionOperationResult>,
+}
+
+// ============================================================================
+// Phase 4: Google Drive Integration DTOs
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveOAuthConfigStatus {
+    pub client_id: Option<String>,
+    pub client_id_source: String,
+    pub has_client_secret: bool,
+    pub required_scope: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveDriveOAuthConfigRequest {
+    pub client_id: Option<String>,
+    /// Optional client secret stored ONLY in OS keyring (never SQLite or settings.json).
+    pub client_secret: Option<String>,
+    #[serde(default)]
+    pub clear_client_secret: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveConnection {
+    pub id: String,
+    pub account_email: String,
+    pub account_display_name: Option<String>,
+    pub scopes: Vec<String>,
+    pub root_folder_drive_id: Option<String>,
+    pub root_folder_name: String,
+    /// `"manual"` | `"auto"` | `"folder_auto"`
+    pub upload_mode: String,
+    /// `"update_latest"` | `"create_new"` | `"manual_version"`
+    pub version_policy: String,
+    pub include_past_versions: bool,
+    pub include_solution_source: bool,
+    pub include_artifacts: bool,
+    /// `"connected"` | `"reauth_required"` | `"disconnected"`
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDriveSettingsRequest {
+    pub root_folder_name: Option<String>,
+    pub upload_mode: Option<String>,
+    pub version_policy: Option<String>,
+    pub include_past_versions: Option<bool>,
+    pub include_solution_source: Option<bool>,
+    pub include_artifacts: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveFileMapping {
+    pub id: String,
+    pub connection_id: String,
+    pub document_id: Option<String>,
+    pub logical_role: String,
+    pub drive_file_id: String,
+    pub drive_folder_id: String,
+    pub drive_filename: String,
+    pub web_view_link: Option<String>,
+    pub last_uploaded_attachment_id: Option<String>,
+    pub last_uploaded_sha256: Option<String>,
+    pub remote_md5_checksum: Option<String>,
+    pub remote_modified_time: Option<String>,
+    pub remote_version: Option<String>,
+    /// `"uploaded"` | `"update_required"` | `"conflict"` | `"remote_deleted"` | `"error"`
+    pub sync_status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveUploadJob {
+    pub id: String,
+    pub connection_id: String,
+    pub document_id: String,
+    pub logical_role: String,
+    pub attachment_id: Option<String>,
+    pub drive_file_id: Option<String>,
+    pub target_filename: String,
+    pub idempotency_key: String,
+    pub force_overwrite: bool,
+    pub save_as_new: bool,
+    /// `"pending"` | `"uploading"` | `"uploaded"` | `"update_required"` | `"failed"` | `"conflict"` | `"cancelled"`
+    pub status: String,
+    pub attempt_count: i64,
+    pub next_retry_at: Option<String>,
+    pub last_error_code: Option<String>,
+    pub last_error_message: Option<String>,
+    pub conflict_remote_md5: Option<String>,
+    pub conflict_remote_modified_time: Option<String>,
+    pub conflict_remote_version: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveDocumentSyncSummary {
+    pub document_id: String,
+    /// `"none"` | `"uploaded"` | `"uploading"` | `"pending"` | `"update_required"` | `"conflict"` | `"remote_deleted"` | `"failed"`
+    pub aggregate_status: String,
+    pub uploaded_count: usize,
+    pub pending_count: usize,
+    pub conflict_count: usize,
+    pub failed_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveOverview {
+    pub oauth_config: DriveOAuthConfigStatus,
+    pub connection: Option<DriveConnection>,
+    pub jobs: Vec<DriveUploadJob>,
+    pub document_summaries: Vec<DriveDocumentSyncSummary>,
+    pub pending_count: usize,
+    pub uploading_count: usize,
+    pub conflict_count: usize,
+    pub failed_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentDriveStatus {
+    pub document_id: String,
+    pub files: Vec<DriveFileMapping>,
+    pub jobs: Vec<DriveUploadJob>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnqueueDriveUploadRequest {
+    pub document_id: String,
+    /// Optional explicit solution ID (used by Version History tab `manual_version` uploads).
+    pub solution_id: Option<String>,
+    /// `"default"` (original + latest PDF) | `"original_only"` | `"latest_solution_only"` | `"all_configured"`
+    #[serde(default = "default_drive_upload_scope")]
+    pub scope: String,
+}
+
+fn default_drive_upload_scope() -> String {
+    "default".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnqueueDriveUploadResult {
+    pub enqueued_jobs: Vec<DriveUploadJob>,
+    pub skipped_up_to_date: Vec<String>,
+    pub notices: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveDriveConflictRequest {
+    pub job_id: String,
+    /// `"overwrite"` | `"save_as_new"` | `"recreate_after_remote_delete"` | `"cancel"`
+    pub resolution: String,
 }

@@ -142,6 +142,10 @@ export interface ScienceMcpSettings {
   defaultPlotFormat: "svg" | "png";
 }
 
+export interface DriveAppSettings {
+  oauthClientId: string | null;
+}
+
 export interface AppSettings {
   language: string;
   theme: ThemePreference;
@@ -154,6 +158,7 @@ export interface AppSettings {
   agentAssignments: AgentPurposeAssignments;
   prompts: PromptSettings;
   scienceMcp: ScienceMcpSettings;
+  drive?: DriveAppSettings;
 }
 
 export interface StorageStats {
@@ -571,4 +576,164 @@ export interface RunScienceToolResult {
   verification: VerificationResultRecord | null;
   createdArtifacts: AttachmentInfo[];
   updatedSolution: SolutionOperationResult | null;
+}
+
+// ============================================================================
+// Phase 4: Google Drive Export, OAuth PKCE & Persistent Job Queue
+// ============================================================================
+
+export type DriveUploadMode = "manual" | "auto" | "folder_auto";
+export type DriveVersionPolicy = "update_latest" | "create_new" | "manual_version";
+export type DriveConnectionStatus = "connected" | "reauth_required" | "disconnected";
+export type DriveFileSyncStatus =
+  | "uploaded"
+  | "update_required"
+  | "conflict"
+  | "remote_deleted"
+  | "error";
+export type DriveJobStatus =
+  | "pending"
+  | "uploading"
+  | "uploaded"
+  | "update_required"
+  | "failed"
+  | "conflict"
+  | "cancelled";
+export type DriveAggregateStatus =
+  | "none"
+  | "uploaded"
+  | "uploading"
+  | "pending"
+  | "update_required"
+  | "conflict"
+  | "remote_deleted"
+  | "failed";
+export type DriveConflictResolution =
+  | "overwrite"
+  | "save_as_new"
+  | "recreate_after_remote_delete"
+  | "cancel";
+
+export interface DriveOAuthConfigStatus {
+  clientId: string | null;
+  clientIdSource: "settings" | "env" | "none" | string;
+  hasClientSecret: boolean;
+  requiredScope: string;
+}
+
+export interface SaveDriveOAuthConfigRequest {
+  clientId?: string | null;
+  clientSecret?: string | null;
+  clearClientSecret?: boolean;
+}
+
+export interface DriveConnection {
+  id: string;
+  accountEmail: string;
+  accountDisplayName: string | null;
+  scopes: string[];
+  rootFolderDriveId: string | null;
+  rootFolderName: string;
+  uploadMode: DriveUploadMode;
+  versionPolicy: DriveVersionPolicy;
+  includePastVersions: boolean;
+  includeSolutionSource: boolean;
+  includeArtifacts: boolean;
+  status: DriveConnectionStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateDriveSettingsRequest {
+  rootFolderName?: string | null;
+  uploadMode?: DriveUploadMode | null;
+  versionPolicy?: DriveVersionPolicy | null;
+  includePastVersions?: boolean | null;
+  includeSolutionSource?: boolean | null;
+  includeArtifacts?: boolean | null;
+}
+
+export interface DriveFileMapping {
+  id: string;
+  connectionId: string;
+  documentId: string | null;
+  logicalRole: string;
+  driveFileId: string;
+  driveFolderId: string;
+  driveFilename: string;
+  webViewLink: string | null;
+  lastUploadedAttachmentId: string | null;
+  lastUploadedSha256: string | null;
+  remoteMd5Checksum: string | null;
+  remoteModifiedTime: string | null;
+  remoteVersion: string | null;
+  syncStatus: DriveFileSyncStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DriveUploadJob {
+  id: string;
+  connectionId: string;
+  documentId: string;
+  logicalRole: string;
+  attachmentId: string | null;
+  driveFileId: string | null;
+  targetFilename: string;
+  idempotencyKey: string;
+  forceOverwrite: boolean;
+  saveAsNew: boolean;
+  status: DriveJobStatus;
+  attemptCount: number;
+  nextRetryAt: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  conflictRemoteMd5: string | null;
+  conflictRemoteModifiedTime: string | null;
+  conflictRemoteVersion: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DriveDocumentSyncSummary {
+  documentId: string;
+  aggregateStatus: DriveAggregateStatus;
+  uploadedCount: number;
+  pendingCount: number;
+  conflictCount: number;
+  failedCount: number;
+}
+
+export interface DriveOverview {
+  oauthConfig: DriveOAuthConfigStatus;
+  connection: DriveConnection | null;
+  jobs: DriveUploadJob[];
+  documentSummaries: DriveDocumentSyncSummary[];
+  pendingCount: number;
+  uploadingCount: number;
+  conflictCount: number;
+  failedCount: number;
+}
+
+export interface DocumentDriveStatus {
+  documentId: string;
+  files: DriveFileMapping[];
+  jobs: DriveUploadJob[];
+}
+
+export interface EnqueueDriveUploadRequest {
+  documentId: string;
+  solutionId?: string | null;
+  scope?: "default" | "original_only" | "latest_solution_only" | "all_configured";
+}
+
+export interface EnqueueDriveUploadResult {
+  enqueuedJobs: DriveUploadJob[];
+  skippedUpToDate: string[];
+  notices: string[];
+}
+
+export interface ResolveDriveConflictRequest {
+  jobId: string;
+  resolution: DriveConflictResolution;
 }

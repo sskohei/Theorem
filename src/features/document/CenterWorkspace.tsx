@@ -1,4 +1,4 @@
-import { AlertTriangle, FileUp, Info, X } from "lucide-react";
+import { AlertTriangle, CloudUpload, FileUp, Info, X } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { CalculationsTab } from "@/features/verification/CalculationsTab";
@@ -6,6 +6,7 @@ import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useAiWorkspaceStore } from "@/stores/useAiWorkspaceStore";
 import { useDocumentStore } from "@/stores/useDocumentStore";
+import { useDriveStore } from "@/stores/useDriveStore";
 import { useLayoutStore, type CenterTab } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
 import { useScienceStore } from "@/stores/useScienceStore";
@@ -49,7 +50,19 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
     clearError: clearAiError,
   } = useAiWorkspaceStore();
   const { toolExecutions, verifications } = useScienceStore();
+  const {
+    overview: driveOverview,
+    documentStatusById,
+    uploadingDocId,
+    uploadDocument: uploadDocumentToDrive,
+    openConflictModal,
+  } = useDriveStore();
   const calcBadgeCount = verifications.length + toolExecutions.length;
+  const activeDocId = detail?.document.id ?? null;
+  const docDriveStatus = activeDocId ? documentStatusById[activeDocId] : undefined;
+  const docConflictJob =
+    docDriveStatus?.jobs.find((j) => j.status === "conflict") ?? null;
+  const driveConnected = driveOverview?.connection?.status === "connected";
 
   const tabs: { id: CenterTab; label: string; count?: number; phaseBadge?: string }[] = [
     { id: "original", label: t.tabs.original },
@@ -137,6 +150,42 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
             </button>
           );
         })}
+
+        {activeDocId && driveConnected && (
+          <div className="ml-auto flex shrink-0 items-center gap-1.5 pb-1 pr-1">
+            {docConflictJob ? (
+              <Button
+                size="xs"
+                variant="primary"
+                onClick={() => openConflictModal(docConflictJob)}
+              >
+                <AlertTriangle className="h-3 w-3" />
+                <span>Drive 競合を解決</span>
+              </Button>
+            ) : (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={uploadingDocId === activeDocId}
+                onClick={() =>
+                  void uploadDocumentToDrive({
+                    documentId: activeDocId,
+                    scope: "default",
+                  })
+                }
+              >
+                <CloudUpload className="h-3 w-3" />
+                <span>
+                  {uploadingDocId === activeDocId
+                    ? "投入中..."
+                    : (docDriveStatus?.files.length ?? 0) > 0
+                      ? "Drive 更新"
+                      : "Drive へ保存"}
+                </span>
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Error Banner */}

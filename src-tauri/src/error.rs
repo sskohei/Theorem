@@ -43,6 +43,12 @@ pub enum AppError {
 
     #[error("OS キーチェーン操作に失敗しました: {0}")]
     Keyring(String),
+
+    #[error("Google Drive 操作に失敗しました: {0}")]
+    Drive(String),
+
+    #[error("Google Drive の再認証が必要です: {0}")]
+    DriveAuthRequired(String),
 }
 
 impl From<sqlx::Error> for AppError {
@@ -138,6 +144,19 @@ impl From<AppError> for ApiError {
             AppError::Keyring(msg) => (
                 "KEYRING_ERROR",
                 "OS キーチェーンへの認証情報アクセスに失敗しました".to_string(),
+                Some(redact_secrets(&msg)),
+                true,
+            ),
+            AppError::Drive(msg) => (
+                "DRIVE_ERROR",
+                "Google Drive 連携処理に失敗しました".to_string(),
+                Some(redact_secrets(&msg)),
+                true,
+            ),
+            AppError::DriveAuthRequired(msg) => (
+                "DRIVE_REAUTH_REQUIRED",
+                "Google Drive の認証が期限切れまたは失効しました。設定画面から再認証してください。"
+                    .to_string(),
                 Some(redact_secrets(&msg)),
                 true,
             ),

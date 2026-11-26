@@ -1,12 +1,16 @@
 pub mod ai_service;
+pub mod drive_service;
+#[cfg(test)]
+mod drive_tests;
 pub mod science_service;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, Notify, RwLock};
 use uuid::Uuid;
 
 use crate::agents::manager::{AgentManager, EventEmitter};
@@ -19,14 +23,22 @@ use crate::domain::{
     ImportedDocumentItem, StorageStats, Subject, Tag,
 };
 use crate::error::{AppError, AppResult};
+use crate::gdrive::DriveEndpoints;
 use crate::security::DiagnosticLogger;
 use crate::storage::AppStorage;
 
+pub type DriveUpdateEmitter = Arc<dyn Fn() + Send + Sync>;
+
+#[derive(Clone)]
 pub struct AppState {
-    pub(crate) db: RwLock<Database>,
+    pub(crate) db: Arc<RwLock<Database>>,
     pub(crate) storage: AppStorage,
     pub(crate) logger: DiagnosticLogger,
     pub(crate) agents: Arc<AgentManager>,
+    pub(crate) http_client: reqwest::Client,
+    pub(crate) drive_endpoints: Arc<RwLock<DriveEndpoints>>,
+    pub(crate) drive_worker_notify: Arc<Notify>,
+    pub(crate) drive_emitter: Arc<Mutex<Option<DriveUpdateEmitter>>>,
 }
 
 impl AppState {
@@ -36,17 +48,45 @@ impl AppState {
         let db = Database::connect(&storage.database_path()).await?;
         let workspaces_dir = storage.root().join("workspaces");
         let agents = Arc::new(AgentManager::new(workspaces_dir));
+        let http_client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(120))
+            .build()
+            .map_err(|e| AppError::Drive(format!("HTTP クライアント初期化失敗: {e}")))?;
         logger.log_info("app_started", "Theorem core initialized");
         Ok(Self {
-            db: RwLock::new(db),
+            db: Arc::new(RwLock::new(db)),
             storage,
             logger,
             agents,
+            http_client,
+            drive_endpoints: Arc::new(RwLock::new(DriveEndpoints::default())),
+            drive_worker_notify: Arc::new(Notify::new()),
+            drive_emitter: Arc::new(Mutex::new(None)),
         })
     }
 
     pub async fn set_agent_event_emitter(&self, emitter: EventEmitter) {
         self.agents.set_emitter(emitter).await;
+    }
+
+    pub async fn set_drive_event_emitter(&self, emitter: DriveUpdateEmitter) {
+        *self.drive_emitter.lock().await = Some(emitter);
+    }
+
+    /// Spawns the resilient background worker that drains due `drive_upload_jobs`
+    /// whenever notified or every 15 seconds for backoff retries.
+    pub fn spawn_drive_background_worker(&self) {
+        let state = self.clone();
+        tokio::spawn(async move {
+            loop {
+                let _ = state.process_drive_queue_once().await;
+                tokio::select! {
+                    _ = state.drive_worker_notify.notified() => {}
+                    _ = tokio::time::sleep(Duration::from_secs(15)) => {}
+                }
+            }
+        });
     }
 
     pub async fn bootstrap(&self) -> AppResult<BootstrapState> {
@@ -240,6 +280,12 @@ impl AppState {
             }
         }
 
+        drop(db);
+        for item in &imported {
+            self.maybe_auto_enqueue_drive_for_document(&item.detail.document.id, "original_only")
+                .await;
+        }
+
         Ok(ImportBatchResult { imported, failures })
     }
 
@@ -253,20 +299,24 @@ impl AppState {
         let bytes = STANDARD.decode(base64_data.trim()).map_err(|_| {
             AppError::Validation("Base64 ファイルデータのデコードに失敗しました".into())
         })?;
-        let db = self.db.read().await;
-        let item = document::import_bytes(
-            db.pool(),
-            &self.storage,
-            subject_id,
-            folder_id,
-            filename,
-            &bytes,
-        )
-        .await?;
+        let item = {
+            let db = self.db.read().await;
+            document::import_bytes(
+                db.pool(),
+                &self.storage,
+                subject_id,
+                folder_id,
+                filename,
+                &bytes,
+            )
+            .await?
+        };
         self.logger.log_info(
             "document_imported_bytes",
             &format!("document_id={}", item.detail.document.id),
         );
+        self.maybe_auto_enqueue_drive_for_document(&item.detail.document.id, "original_only")
+            .await;
         Ok(item)
     }
 

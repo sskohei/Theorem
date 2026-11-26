@@ -1,6 +1,6 @@
 # 開発者向けガイド（Development）
 
-> **ステータス**: Active v1.3（Phase 3 Science MCP Server 統合反映済み）
+> **ステータス**: Active v1.4（Phase 4 Google Drive 連携・MVP 統合反映済み）
 > **最優先開発 OS**: Windows 11（macOS / Linux は将来対応）
 > **最終更新**: 2026-11-26
 
@@ -71,6 +71,10 @@ cargo test
 # 任意: 実機インストール済み OpenAI Codex を使った Phase 2 / Phase 3 ライブ E2E 検証
 cargo test --lib -- --ignored test_live_codex_full_phase2_workflow --nocapture
 cargo test --lib -- --ignored test_live_codex_phase3_science_mcp --nocapture
+
+# 任意: 実 Google Cloud Desktop OAuth クライアントを使った Phase 4 ライブ接続検証
+# （事前に $env:GOOGLE_OAUTH_CLIENT_ID（必要時 $env:GOOGLE_OAUTH_CLIENT_SECRET）を設定）
+cargo test --lib -- --ignored test_live_google_drive_oauth_and_same_id_update --nocapture
 ```
 
 ### 2.3 Science MCP Server（Phase 3〜）

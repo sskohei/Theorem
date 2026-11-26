@@ -25,6 +25,7 @@ import { useLayoutStore, type SettingsCategory } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
 import type { BackupInfo, PdfSettings, RecognitionMode, StorageStats, ThemePreference } from "@/types/ipc";
 import { AgentSettingsPanel, ModelSettingsPanel } from "./AgentSettingsSection";
+import { DriveSettingsPanel } from "./DriveSettingsSection";
 import { ScienceMcpSettingsPanel } from "./ScienceMcpSettingsSection";
 
 export function SettingsModal() {
@@ -88,7 +89,7 @@ export function SettingsModal() {
     { id: "models", label: t.settings.categories.models, icon: Cpu },
     { id: "prompts", label: t.settings.categories.prompts, icon: MessageSquareCode },
     { id: "pdf", label: t.settings.categories.pdf, icon: FileText },
-    { id: "drive", label: t.settings.categories.drive, icon: Cloud, phase: "Phase 4" },
+    { id: "drive", label: t.settings.categories.drive, icon: Cloud },
     { id: "scienceMcp", label: t.settings.categories.scienceMcp, icon: Calculator },
     { id: "storage", label: t.settings.categories.storage, icon: HardDrive },
     { id: "security", label: t.settings.categories.security, icon: ShieldCheck },
@@ -620,6 +621,8 @@ export function SettingsModal() {
               </div>
             )}
 
+            {settingsCategory === "drive" && <DriveSettingsPanel />}
+
             {settingsCategory === "scienceMcp" && <ScienceMcpSettingsPanel />}
 
             {![
@@ -629,6 +632,7 @@ export function SettingsModal() {
               "models",
               "prompts",
               "pdf",
+              "drive",
               "scienceMcp",
               "storage",
               "security",

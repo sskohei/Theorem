@@ -5,8 +5,8 @@
 **Theorem**（旧称: FormulaDesk）は、大学数学・大学物理の学習に特化した、オープンソースかつローカルファーストなデスクトップアプリケーションです。
 PDF や画像形式の問題を取り込むと、ユーザーが既に利用している公式 AI ハーネスと連携して問題文を認識し、途中式・論理的証明・計算検証・図やグラフを含む解答を生成します。生成した解答は Typst で高品質な日本語・数式入り PDF としてローカルに保存でき、問題や解答について AI と継続的に議論・検証・修正できます。
 
-> **現在のプロジェクトステータス**: **Pre-MVP（Phase 0 PoC・Phase 1 アプリ基盤・Phase 2 AI 機能統合・Phase 3 Science MCP Server 完了 / Phase 4 Google Drive 連携 着手可能）**
-> 仕様書・設計ドキュメント・ADR・Phase 0 PoC（`poc/`）・Phase 1 アプリ基盤・Phase 2 AI 機能・Phase 3 Science MCP Server（`science-mcp/` Python/`uv` 全 21 ツール・AST ホワイトリスト安全パーサー・タイムアウト隔離ワーカー・セッションスコープ MCP 登録・5 状態検証＋偽装防御・SVG/PNG グラフ生成＆Typst PDF 埋め込み・「計算結果」タブ・設定「計算ツール」パネル）を実装・検証済みです。最新の進捗と検証状況は [docs/implementation-status.md](./docs/implementation-status.md) を参照してください。
+> **現在のプロジェクトステータス**: **MVP 実装完了（Phase 0 PoC・Phase 1 アプリ基盤・Phase 2 AI 機能統合・Phase 3 Science MCP Server・Phase 4 Google Drive 連携 実装＆自動検証完了／実 Google アカウント OAuth はクライアント ID 未設定のため保留・Phase 5 着手可能）**
+> 仕様書・設計ドキュメント・ADR・Phase 0 PoC（`poc/`）・Phase 1 アプリ基盤・Phase 2 AI 機能・Phase 3 Science MCP Server（`science-mcp/` Python/`uv` 全 21 ツール・AST ホワイトリスト安全パーサー・タイムアウト隔離ワーカー・SVG/PNG グラフ＆Typst PDF 埋め込み）・Phase 4 Google Drive 連携（OAuth 2.0 PKCE + `drive.file` 最小スコープ・OS キーチェーン保管・ローカル階層ミラー・同一 ID 更新・永続ジョブキュー＆指数バックオフ・`appProperties` 冪等復旧・外部変更競合検出・ローカル削除非伝播）を実装・検証済みです。最新の進捗と MVP 19 項目の検証状況は [docs/implementation-status.md](./docs/implementation-status.md) を参照してください。
 
 ---
 
@@ -71,7 +71,7 @@ Theorem
 | **Phase 1** | アプリ基盤：Tauri・React 3 カラム UI・SQLite・問題取り込みとビューア | MVP | [#2](https://github.com/sskohei/Theorem/issues/2) | 実装・ローカル検証完了 |
 | **Phase 2** | AI 機能：エージェント管理・問題認識・解答生成・チャット・PDF・バージョン管理 | MVP | [#3](https://github.com/sskohei/Theorem/issues/3) | 実装・検証完了 |
 | **Phase 3** | 数学・物理計算ツール：Science MCP Server・検証・次元解析・グラフ埋め込み | MVP | [#4](https://github.com/sskohei/Theorem/issues/4) | 実装・検証完了 |
-| **Phase 4** | Google Drive 連携：OAuth PKCE・アップロード・同一 ID 更新・永続ジョブキュー | MVP | [#5](https://github.com/sskohei/Theorem/issues/5) | 未着手 |
+| **Phase 4** | Google Drive 連携：OAuth PKCE・アップロード・同一 ID 更新・永続ジョブキュー | MVP | [#5](https://github.com/sskohei/Theorem/issues/5) | 実装・自動検証完了（実 Google OAuth 保留） |
 | **Phase 5** | 高度な学習機能：解答部分修正・差分承認・答案添削・全文検索・高度物理図 | Post-MVP | [#6](https://github.com/sskohei/Theorem/issues/6) | 未着手 |
 | **Phase 6** | OSS 正式公開：インストーラー・クロスプラットフォーム・配布・CI/CD・日英対応 | Release | [#7](https://github.com/sskohei/Theorem/issues/7) | 未着手 |
 

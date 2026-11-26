@@ -2,11 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
+  AlertTriangle,
+  Cloud,
   CloudOff,
   FilePlus2,
   Moon,
   PanelLeft,
   PanelRight,
+  RefreshCw,
   Settings,
   Sun,
   Upload,
@@ -15,6 +18,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ChatSidebar } from "@/features/chat/ChatSidebar";
 import { CenterWorkspace } from "@/features/document/CenterWorkspace";
+import { DriveConflictModal } from "@/features/drive/DriveConflictModal";
 import { LibrarySidebar } from "@/features/library/LibrarySidebar";
 import { SettingsModal } from "@/features/settings/SettingsModal";
 import { useI18n } from "@/lib/i18n";
@@ -24,6 +28,7 @@ import { useAgentStore } from "@/stores/useAgentStore";
 import { useAiWorkspaceStore } from "@/stores/useAiWorkspaceStore";
 import { useChatStore } from "@/stores/useChatStore";
 import { useDocumentStore } from "@/stores/useDocumentStore";
+import { useDriveStore } from "@/stores/useDriveStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
 import { useScienceStore } from "@/stores/useScienceStore";
@@ -59,49 +64,69 @@ export function App() {
   const { loadForDocument: loadChatForDocument, handleAgentEvent } = useChatStore();
   const { loadForDocument: loadScienceForDocument, loadForSolution: loadScienceForSolution } =
     useScienceStore();
+  const {
+    overview: driveOverview,
+    loadOverview: loadDriveOverview,
+    loadDocumentStatus: loadDriveDocumentStatus,
+    openConflictModal,
+  } = useDriveStore();
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [draggingOverlay, setDraggingOverlay] = useState(false);
 
-  // 1. Initial bootstrap from Rust SQLite core + AI agent profiles
+  // 1. Initial bootstrap from Rust SQLite core + AI agent profiles + Google Drive status
   useEffect(() => {
     void bootstrap();
     void loadProfiles();
-  }, [bootstrap, loadProfiles]);
+    void loadDriveOverview();
+  }, [bootstrap, loadProfiles, loadDriveOverview]);
 
-  // 2. Load selected document detail, problems, solutions, science history & conversations
+  // 2. Load selected document detail, problems, solutions, science history, drive status & conversations
   useEffect(() => {
     void loadDocument(selectedDocumentId);
     void loadAiForDocument(selectedDocumentId);
     void loadChatForDocument(selectedDocumentId);
     void loadScienceForDocument(selectedDocumentId);
+    void loadDriveDocumentStatus(selectedDocumentId);
   }, [
     selectedDocumentId,
     loadDocument,
     loadAiForDocument,
     loadChatForDocument,
     loadScienceForDocument,
+    loadDriveDocumentStatus,
   ]);
 
   useEffect(() => {
     void loadScienceForSolution(selectedSolutionId);
   }, [selectedSolutionId, loadScienceForSolution]);
 
-  // 2b. Subscribe to live Rust AgentManager streaming events (`agent://event`)
+  // 2b. Subscribe to live Rust AgentManager & Google Drive events
   useEffect(() => {
     if (!isTauriRuntime()) return;
-    let unlisten: (() => void) | null = null;
+    let unlistenAgent: (() => void) | null = null;
+    let unlistenDrive: (() => void) | null = null;
     void listen<AgentEventEnvelope>("agent://event", (event) => {
       handleAgentEvent(event.payload);
     })
       .then((fn) => {
-        unlisten = fn;
+        unlistenAgent = fn;
+      })
+      .catch(() => {});
+    void listen("drive://updated", () => {
+      void loadDriveOverview();
+      const docId = useLibraryStore.getState().selectedDocumentId;
+      if (docId) void loadDriveDocumentStatus(docId);
+    })
+      .then((fn) => {
+        unlistenDrive = fn;
       })
       .catch(() => {});
     return () => {
-      if (unlisten) unlisten();
+      if (unlistenAgent) unlistenAgent();
+      if (unlistenDrive) unlistenDrive();
     };
-  }, [handleAgentEvent]);
+  }, [handleAgentEvent, loadDriveOverview, loadDriveDocumentStatus]);
 
   // 3. Synchronize light/dark/system theme class on <html>
   useEffect(() => {
@@ -312,15 +337,70 @@ export function App() {
             {t.appName}
           </span>
           <Badge variant="info" className="hidden sm:inline-flex">
-            Phase 3
+            MVP (Phase 4)
           </Badge>
         </div>
 
         <div className="flex items-center gap-1.5">
-          <Badge variant="outline" className="hidden md:inline-flex gap-1 text-slate-500">
-            <CloudOff className="h-3 w-3" />
-            <span>{t.header.driveNotConnected}</span>
-          </Badge>
+          {(() => {
+            const conn = driveOverview?.connection;
+            const conflictJob = driveOverview?.jobs.find((j) => j.status === "conflict") ?? null;
+            if (conflictJob) {
+              return (
+                <button
+                  type="button"
+                  onClick={() => openConflictModal(conflictJob)}
+                  className="hidden md:inline-flex items-center gap-1 rounded-full border border-amber-400 bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-200"
+                >
+                  <AlertTriangle className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                  <span>Drive 競合あり ({driveOverview?.conflictCount})</span>
+                </button>
+              );
+            }
+            if (conn?.status === "reauth_required") {
+              return (
+                <button
+                  type="button"
+                  onClick={() => openSettings("drive")}
+                  className="hidden md:inline-flex items-center gap-1 rounded-full border border-amber-400 bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-200"
+                >
+                  <AlertTriangle className="h-3 w-3" />
+                  <span>Drive 要再認証</span>
+                </button>
+              );
+            }
+            if (conn?.status === "connected") {
+              const activeCount =
+                (driveOverview?.pendingCount ?? 0) + (driveOverview?.uploadingCount ?? 0);
+              return (
+                <button
+                  type="button"
+                  onClick={() => openSettings("drive")}
+                  title={`接続済み: ${conn.accountEmail}`}
+                  className="hidden md:inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200"
+                >
+                  {activeCount > 0 ? (
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Cloud className="h-3 w-3" />
+                  )}
+                  <span>
+                    {activeCount > 0 ? `Drive 送信中 (${activeCount})` : "Drive: 接続済"}
+                  </span>
+                </button>
+              );
+            }
+            return (
+              <button
+                type="button"
+                onClick={() => openSettings("drive")}
+                className="hidden md:inline-flex items-center gap-1 rounded-full border border-slate-300 px-2.5 py-0.5 text-[11px] text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+              >
+                <CloudOff className="h-3 w-3" />
+                <span>{t.header.driveNotConnected}</span>
+              </button>
+            );
+          })()}
 
           <Button size="xs" variant="outline" onClick={() => void handleImportClick()}>
             <FilePlus2 className="h-3.5 w-3.5" />
@@ -411,6 +491,7 @@ export function App() {
       )}
 
       <SettingsModal />
+      <DriveConflictModal />
     </div>
   );
 }

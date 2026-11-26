@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { tauriClient } from "@/services/tauriClient";
 import { useDocumentStore } from "@/stores/useDocumentStore";
+import { useDriveStore } from "@/stores/useDriveStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
 import type { BootstrapState, DocumentDetail, DocumentSummary } from "@/types/ipc";
@@ -43,6 +44,9 @@ vi.mock("@/services/tauriClient", async (importOriginal) => {
       listSolutionVerifications: vi.fn(),
       listSolutionArtifacts: vi.fn(),
       checkScienceMcpStatus: vi.fn(),
+      getDriveOverview: vi.fn(),
+      listDocumentDriveStatus: vi.fn(),
+      setFolderAutoUpload: vi.fn(),
     },
   };
 });
@@ -153,6 +157,9 @@ const SAMPLE_BOOT: BootstrapState = {
       timeoutSeconds: 10,
       defaultPlotFormat: "svg",
     },
+    drive: {
+      oauthClientId: null,
+    },
   },
 };
 
@@ -212,6 +219,17 @@ describe("Theorem App Shell & Stores", () => {
       loading: false,
       error: null,
     });
+    useDriveStore.setState({
+      overview: null,
+      documentStatusById: {},
+      loading: false,
+      connecting: false,
+      uploadingDocId: null,
+      processingQueue: false,
+      activeConflictJob: null,
+      lastNotice: null,
+      error: null,
+    });
 
     vi.mocked(tauriClient.getBootstrapState).mockResolvedValue(SAMPLE_BOOT);
     vi.mocked(tauriClient.listDocuments).mockResolvedValue([SAMPLE_DOC]);
@@ -259,6 +277,26 @@ describe("Theorem App Shell & Stores", () => {
     vi.mocked(tauriClient.listDocumentToolExecutions).mockResolvedValue([]);
     vi.mocked(tauriClient.listSolutionVerifications).mockResolvedValue([]);
     vi.mocked(tauriClient.listSolutionArtifacts).mockResolvedValue([]);
+    vi.mocked(tauriClient.getDriveOverview).mockResolvedValue({
+      connection: null,
+      oauthConfig: {
+        clientId: null,
+        hasClientSecret: false,
+        clientIdSource: "none",
+        requiredScope: "https://www.googleapis.com/auth/drive.file",
+      },
+      jobs: [],
+      documentSummaries: [],
+      pendingCount: 0,
+      uploadingCount: 0,
+      conflictCount: 0,
+      failedCount: 0,
+    });
+    vi.mocked(tauriClient.listDocumentDriveStatus).mockResolvedValue({
+      documentId: "doc-1",
+      files: [],
+      jobs: [],
+    });
   });
 
   it("renders 3-column workspace, subjects, folders, document list, and image viewer", async () => {

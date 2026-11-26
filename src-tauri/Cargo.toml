@@ -18,11 +18,13 @@ async-trait = "0.1"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
+getrandom = "0.3"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 jsonschema = "0.29"
 keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service"] }
 lopdf = "0.36"
 mitex = "0.2.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -35,11 +37,12 @@ typst = "0.15.1"
 typst-assets = { version = "0.15.1", features = ["fonts"] }
 typst-layout = "0.15.1"
 typst-pdf = "0.15.1"
+url = "2"
 uuid = { version = "1", features = ["v4"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 tempfile = "3"

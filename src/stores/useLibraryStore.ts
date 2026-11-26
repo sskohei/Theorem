@@ -59,6 +59,7 @@ interface LibraryState {
 
   createFolder: (subjectId: string, parentId: string | null, name: string) => Promise<void>;
   updateFolder: (id: string, name: string, parentId: string | null) => Promise<void>;
+  setFolderAutoUpload: (id: string, autoUploadDrive: boolean) => Promise<void>;
   deleteFolder: (id: string) => Promise<void>;
 
   createTag: (name: string, color?: string) => Promise<void>;
@@ -111,6 +112,9 @@ const DEFAULT_SETTINGS: AppSettings = {
     serverDir: null,
     timeoutSeconds: 10,
     defaultPlotFormat: "svg",
+  },
+  drive: {
+    oauthClientId: null,
   },
 };
 
@@ -296,6 +300,18 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   updateFolder: async (id, name, parentId) => {
     try {
       const updated = await tauriClient.updateFolder(id, name, parentId);
+      set((s) => ({
+        folders: s.folders.map((f) => (f.id === id ? updated : f)),
+        error: null,
+      }));
+    } catch (err) {
+      set({ error: normalizeApiError(err) });
+    }
+  },
+
+  setFolderAutoUpload: async (id, autoUploadDrive) => {
+    try {
+      const updated = await tauriClient.setFolderAutoUpload(id, autoUploadDrive);
       set((s) => ({
         folders: s.folders.map((f) => (f.id === id ? updated : f)),
         error: null,

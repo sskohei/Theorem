@@ -346,6 +346,46 @@ pub async fn update_folder(
     })
 }
 
+pub async fn set_folder_auto_upload(
+    pool: &Pool<Sqlite>,
+    id: &str,
+    auto_upload_drive: bool,
+) -> AppResult<Folder> {
+    let ts = now_iso();
+    let affected =
+        sqlx::query("UPDATE folders SET auto_upload_drive = ?1, updated_at = ?2 WHERE id = ?3")
+            .bind(if auto_upload_drive { 1 } else { 0 })
+            .bind(&ts)
+            .bind(id)
+            .execute(pool)
+            .await?
+            .rows_affected();
+    if affected == 0 {
+        return Err(AppError::NotFound(
+            "指定されたフォルダが見つかりません".into(),
+        ));
+    }
+
+    let r = sqlx::query(
+        "SELECT id, subject_id, parent_id, name, auto_upload_drive, sort_order, created_at, updated_at
+         FROM folders WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(Folder {
+        id: r.get("id"),
+        subject_id: r.get("subject_id"),
+        parent_id: r.get("parent_id"),
+        name: r.get("name"),
+        auto_upload_drive: r.get::<i64, _>("auto_upload_drive") != 0,
+        sort_order: r.get("sort_order"),
+        created_at: r.get("created_at"),
+        updated_at: r.get("updated_at"),
+    })
+}
+
 pub async fn delete_folder(pool: &Pool<Sqlite>, id: &str) -> AppResult<()> {
     let affected = sqlx::query("DELETE FROM folders WHERE id = ?1")
         .bind(id)

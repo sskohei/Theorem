@@ -782,19 +782,22 @@ impl AppState {
                         compiled.page_count,
                     )
                     .await?;
-                let db = self.db.read().await;
-                let updated = ai_repo::update_solution_pdf_attachments(
-                    db.pool(),
-                    &sol.id,
-                    Some(&typ_id),
-                    Some(&pdf_id),
-                    if sol.validation_status == "user_edited" {
-                        "user_edited"
-                    } else {
-                        "valid"
-                    },
-                )
-                .await?;
+                let updated = {
+                    let db = self.db.read().await;
+                    ai_repo::update_solution_pdf_attachments(
+                        db.pool(),
+                        &sol.id,
+                        Some(&typ_id),
+                        Some(&pdf_id),
+                        if sol.validation_status == "user_edited" {
+                            "user_edited"
+                        } else {
+                            "valid"
+                        },
+                    )
+                    .await?
+                };
+                self.on_solution_pdf_updated(&sol.document_id).await;
                 Ok(SolutionOperationResult {
                     solution: updated,
                     schema_issues: Vec::new(),
@@ -1031,6 +1034,7 @@ impl AppState {
                     .await;
                 }
 
+                drop(db);
                 self.logger.log_info(
                     "solution_pdf_compiled",
                     &format!(
@@ -1038,6 +1042,7 @@ impl AppState {
                         saved.id, saved.version_number, compiled.page_count
                     ),
                 );
+                self.on_solution_pdf_updated(document_id).await;
 
                 Ok(SolutionOperationResult {
                     solution: saved,

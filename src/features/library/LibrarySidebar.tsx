@@ -4,6 +4,8 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Cloud,
+  CloudUpload,
   FileImage,
   FilePlus2,
   FileText,
@@ -23,6 +25,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { useDriveStore } from "@/stores/useDriveStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
 import type { DocumentSummary, Folder, Subject, SubjectCategory } from "@/types/ipc";
@@ -73,6 +76,7 @@ export function LibrarySidebar({ searchInputRef, onImportClick }: LibrarySidebar
     deleteSubject,
     createFolder,
     updateFolder,
+    setFolderAutoUpload,
     deleteFolder,
     createTag,
     deleteTag,
@@ -82,6 +86,12 @@ export function LibrarySidebar({ searchInputRef, onImportClick }: LibrarySidebar
     moveDocument,
     deleteDocument,
   } = useLibraryStore();
+  const {
+    overview: driveOverview,
+    uploadingDocId,
+    uploadDocument: uploadDocumentToDrive,
+  } = useDriveStore();
+  const driveConnected = driveOverview?.connection?.status === "connected";
 
   const [expandedSubjects, setExpandedSubjects] = useState<Record<string, boolean>>({});
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
@@ -244,10 +254,32 @@ export function LibrarySidebar({ searchInputRef, onImportClick }: LibrarySidebar
                   >
                     <FolderIcon className="h-3.5 w-3.5 shrink-0 text-amber-500" />
                     <span className="truncate">{folder.name}</span>
+                    {folder.autoUploadDrive && (
+                      <Cloud
+                        aria-label="Drive 自動アップロード有効"
+                        className="h-3 w-3 shrink-0 text-blue-500"
+                      />
+                    )}
                   </button>
                 )}
 
                 <div className="hidden items-center gap-0.5 group-hover:flex">
+                  <button
+                    type="button"
+                    title={
+                      folder.autoUploadDrive
+                        ? "フォルダ自動アップロードを解除"
+                        : "このフォルダを Drive 自動アップロード対象にする"
+                    }
+                    aria-label={`Drive 自動アップロード切替: ${folder.name}`}
+                    onClick={() => void setFolderAutoUpload(folder.id, !folder.autoUploadDrive)}
+                    className={cn(
+                      "rounded p-0.5 hover:bg-slate-300/70 dark:hover:bg-slate-700",
+                      folder.autoUploadDrive && "text-blue-600 dark:text-blue-400",
+                    )}
+                  >
+                    <Cloud className="h-3 w-3" />
+                  </button>
                   <button
                     type="button"
                     title={t.library.addFolder}
@@ -782,11 +814,56 @@ export function LibrarySidebar({ searchInputRef, onImportClick }: LibrarySidebar
                                   </Badge>
                                 ) : null;
                               })}
+                              {(() => {
+                                const summary = driveOverview?.documentSummaries.find(
+                                  (s) => s.documentId === doc.id,
+                                );
+                                if (!summary || summary.aggregateStatus === "none") return null;
+                                const labelMap: Record<string, string> = {
+                                  uploaded: "Drive 済",
+                                  uploading: "Drive 送信中",
+                                  pending: "Drive 待機",
+                                  update_required: "Drive 更新要",
+                                  conflict: "Drive 競合",
+                                  remote_deleted: "Drive 削除検出",
+                                  failed: "Drive 失敗",
+                                };
+                                const variant =
+                                  summary.aggregateStatus === "uploaded"
+                                    ? "outline"
+                                    : summary.aggregateStatus === "conflict" ||
+                                        summary.aggregateStatus === "failed" ||
+                                        summary.aggregateStatus === "remote_deleted"
+                                      ? "warning"
+                                      : "info";
+                                return (
+                                  <Badge variant={variant} className="px-1 py-0 text-[9px]">
+                                    {labelMap[summary.aggregateStatus] ?? summary.aggregateStatus}
+                                  </Badge>
+                                );
+                              })()}
                             </div>
                           </div>
                         </button>
 
                         <div className="flex shrink-0 items-center gap-0.5">
+                          {driveConnected && (
+                            <button
+                              type="button"
+                              title="Google Drive へアップロード / 更新"
+                              aria-label={`Google Drive へアップロード: ${doc.title}`}
+                              disabled={uploadingDocId === doc.id}
+                              onClick={() =>
+                                void uploadDocumentToDrive({
+                                  documentId: doc.id,
+                                  scope: "default",
+                                })
+                              }
+                              className="hidden rounded p-0.5 text-blue-600 hover:bg-blue-100 group-hover:inline-flex dark:text-blue-400 dark:hover:bg-blue-950"
+                            >
+                              <CloudUpload className="h-3.5 w-3.5" />
+                            </button>
+                          )}
                           <button
                             type="button"
                             title={t.library.favorites}

@@ -12,8 +12,15 @@ import type {
   ChatMessage,
   Conversation,
   DocumentDetail,
+  DocumentDriveStatus,
   DocumentFilter,
   DocumentSummary,
+  DriveConnection,
+  DriveOAuthConfigStatus,
+  DriveOverview,
+  DriveUploadJob,
+  EnqueueDriveUploadRequest,
+  EnqueueDriveUploadResult,
   Folder,
   GenerateSolutionRequest,
   ImportBatchResult,
@@ -23,9 +30,11 @@ import type {
   RecognitionMode,
   RecognizeProblemsRequest,
   RecognizeProblemsResult,
+  ResolveDriveConflictRequest,
   RunScienceToolRequest,
   RunScienceToolResult,
   SaveAgentProfileRequest,
+  SaveDriveOAuthConfigRequest,
   SaveSolutionEditRequest,
   ScienceMcpStatus,
   SendChatMessageRequest,
@@ -38,6 +47,7 @@ import type {
   SubjectCategory,
   Tag,
   ToolExecutionRecord,
+  UpdateDriveSettingsRequest,
   UpsertProblemRequest,
   VerificationResultRecord,
 } from "@/types/ipc";
@@ -372,6 +382,44 @@ export const tauriClient = {
       attachmentId,
       caption: caption ?? null,
     });
+  },
+
+  // Phase 4: Google Drive Export, OAuth PKCE & Persistent Job Queue
+  getDriveOverview(): Promise<DriveOverview> {
+    return callCommand<DriveOverview>("get_drive_overview");
+  },
+  saveDriveOAuthConfig(input: SaveDriveOAuthConfigRequest): Promise<DriveOAuthConfigStatus> {
+    return callCommand<DriveOAuthConfigStatus>("save_drive_oauth_config", { input });
+  },
+  connectGoogleDrive(): Promise<DriveConnection> {
+    return callCommand<DriveConnection>("connect_google_drive");
+  },
+  disconnectGoogleDrive(): Promise<void> {
+    return callCommand<void>("disconnect_google_drive");
+  },
+  updateDriveSettings(input: UpdateDriveSettingsRequest): Promise<DriveConnection> {
+    return callCommand<DriveConnection>("update_drive_settings", { input });
+  },
+  setFolderAutoUpload(folderId: string, autoUploadDrive: boolean): Promise<Folder> {
+    return callCommand<Folder>("set_folder_auto_upload", { folderId, autoUploadDrive });
+  },
+  uploadDocumentToDrive(input: EnqueueDriveUploadRequest): Promise<EnqueueDriveUploadResult> {
+    return callCommand<EnqueueDriveUploadResult>("upload_document_to_drive", { input });
+  },
+  listDocumentDriveStatus(documentId: string): Promise<DocumentDriveStatus> {
+    return callCommand<DocumentDriveStatus>("list_document_drive_status", { documentId });
+  },
+  retryDriveJob(jobId: string): Promise<DriveUploadJob> {
+    return callCommand<DriveUploadJob>("retry_drive_job", { jobId });
+  },
+  cancelDriveJob(jobId: string): Promise<DriveUploadJob> {
+    return callCommand<DriveUploadJob>("cancel_drive_job", { jobId });
+  },
+  resolveDriveConflict(input: ResolveDriveConflictRequest): Promise<DriveUploadJob> {
+    return callCommand<DriveUploadJob>("resolve_drive_conflict", { input });
+  },
+  processDriveQueueNow(): Promise<number> {
+    return callCommand<number>("process_drive_queue_now");
   },
 
   // Native Dialogs

@@ -17,6 +17,7 @@ use typst_pdf::PdfOptions;
 use crate::domain::{LatexConversionError, PdfSettings};
 use crate::pdf::latex::convert_and_verify_latex;
 
+const TEMPLATE_MITEX_PRELUDE: &str = include_str!("../../../templates/mitex_prelude.typ");
 const TEMPLATE_COMMON: &str = include_str!("../../../templates/common.typ");
 const TEMPLATE_MATH: &str = include_str!("../../../templates/mathematics.typ");
 const TEMPLATE_PHYSICS: &str = include_str!("../../../templates/physics.typ");
@@ -53,6 +54,7 @@ impl SandboxedWorld {
 
         // Register verified built-in templates as virtual project sources
         for (name, content) in [
+            ("mitex_prelude.typ", TEMPLATE_MITEX_PRELUDE),
             ("common.typ", TEMPLATE_COMMON),
             ("mathematics.typ", TEMPLATE_MATH),
             ("physics.typ", TEMPLATE_PHYSICS),

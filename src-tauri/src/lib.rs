@@ -5,6 +5,7 @@ pub mod database;
 pub mod document;
 pub mod domain;
 pub mod error;
+pub mod gdrive;
 pub mod pdf;
 pub mod prompts;
 pub mod science_mcp;
@@ -28,9 +29,20 @@ pub fn run() {
             let state = tauri::async_runtime::block_on(AppState::initialize(data_root))
                 .map_err(|e| std::io::Error::other(e.to_string()))?;
             let handle = app.handle().clone();
-            tauri::async_runtime::block_on(state.set_agent_event_emitter(Arc::new(move |env| {
-                let _ = handle.emit("agent://event", env);
-            })));
+            let drive_handle = app.handle().clone();
+            tauri::async_runtime::block_on(async {
+                state
+                    .set_agent_event_emitter(Arc::new(move |env| {
+                        let _ = handle.emit("agent://event", env);
+                    }))
+                    .await;
+                state
+                    .set_drive_event_emitter(Arc::new(move || {
+                        let _ = drive_handle.emit("drive://updated", ());
+                    }))
+                    .await;
+                state.spawn_drive_background_worker();
+            });
             app.manage(state);
             Ok(())
         })
@@ -96,6 +108,18 @@ pub fn run() {
             commands::list_solution_artifacts,
             commands::run_science_tool,
             commands::attach_artifact_to_solution,
+            commands::get_drive_overview,
+            commands::save_drive_oauth_config,
+            commands::connect_google_drive,
+            commands::disconnect_google_drive,
+            commands::update_drive_settings,
+            commands::set_folder_auto_upload,
+            commands::upload_document_to_drive,
+            commands::list_document_drive_status,
+            commands::retry_drive_job,
+            commands::cancel_drive_job,
+            commands::resolve_drive_conflict,
+            commands::process_drive_queue_now,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

@@ -126,11 +126,15 @@ pub fn redact_secrets(input: &str) -> String {
         "gho_",
         "ghp_",
         "ya29.",
+        "1//",
+        "GOCSPX-",
         "Bearer ",
         "bearer ",
         "refresh_token=",
         "access_token=",
         "client_secret=",
+        "code_verifier=",
+        "code=",
         "password=",
     ];
 

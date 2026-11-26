@@ -1,8 +1,9 @@
 # Google Drive 連携仕様（Google Drive Integration）
 
-> **ステータス**: Draft v1.0（Phase 0 で OAuth・アップロード・同一 ID 更新 PoC、Phase 4 で本実装）
+> **ステータス**: Implemented v1.1（Phase 4 実装・Mock Google OAuth/Drive API v3 統合自動検証完了；実 Google アカウント OAuth 検証はクライアント ID 未設定のため保留）
 > **API**: Google Drive API v3 / OAuth 2.0 (Authorization Code Flow + PKCE)
-> **最終更新**: 2026-11-25
+> **最終更新**: 2026-11-26
+> **補足**: アプリ改称後の既定ルートフォルダ名は `Theorem`、冪等識別用 `appProperties` キーは `theorem_idempotency_key` を使用する。
 
 ---
 

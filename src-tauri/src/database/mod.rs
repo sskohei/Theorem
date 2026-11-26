@@ -1,4 +1,5 @@
 pub mod ai_repo;
+pub mod drive_repo;
 pub mod library_repo;
 pub mod science_repo;
 
@@ -43,6 +44,7 @@ impl Database {
         ai_repo::seed_default_agent_profiles_if_empty(&db.pool).await?;
         ai_repo::recover_interrupted_state(&db.pool).await?;
         science_repo::recover_interrupted_tool_executions(&db.pool).await?;
+        drive_repo::recover_interrupted_drive_jobs(&db.pool).await?;
         Ok(db)
     }
 

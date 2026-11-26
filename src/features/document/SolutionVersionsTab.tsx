@@ -1,8 +1,9 @@
-import { Eye, History, RotateCcw } from "lucide-react";
+import { CloudUpload, Eye, History, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { cn, formatShortDate } from "@/lib/utils";
 import { useAiWorkspaceStore } from "@/stores/useAiWorkspaceStore";
+import { useDriveStore } from "@/stores/useDriveStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 
 export function SolutionVersionsTab() {
@@ -14,6 +15,12 @@ export function SolutionVersionsTab() {
     selectSolution,
     restoreSolutionVersion,
   } = useAiWorkspaceStore();
+  const {
+    overview: driveOverview,
+    uploadingDocId,
+    uploadDocument: uploadDocumentToDrive,
+  } = useDriveStore();
+  const driveConnected = driveOverview?.connection?.status === "connected";
 
   if (solutions.length === 0) {
     return (
@@ -81,6 +88,23 @@ export function SolutionVersionsTab() {
                 <Eye className="h-3.5 w-3.5" />
                 <span>PDF 閲覧</span>
               </Button>
+              {driveConnected && sol.pdfAttachmentId && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={uploadingDocId === sol.documentId}
+                  onClick={() =>
+                    void uploadDocumentToDrive({
+                      documentId: sol.documentId,
+                      solutionId: sol.id,
+                      scope: "default",
+                    })
+                  }
+                >
+                  <CloudUpload className="h-3.5 w-3.5" />
+                  <span>v{sol.versionNumber} を Drive へ保存</span>
+                </Button>
+              )}
               {!sol.isCurrent && (
                 <Button
                   size="xs"
