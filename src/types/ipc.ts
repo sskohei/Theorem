@@ -364,6 +364,7 @@ export interface ChatImageUpload {
 }
 
 export interface SendChatMessageRequest {
+  runId: string;
   conversationId: string;
   documentId: string;
   agentProfileId?: string | null;

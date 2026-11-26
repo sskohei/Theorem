@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::application::AppState;
 use crate::database::drive_repo;
 use crate::domain::{
-    EnqueueDriveUploadRequest, GenerateSolutionRequest, RecognizeProblemsRequest,
+    EnqueueDriveUploadRequest, GenerateSolutionRequest, PageImagePayload, RecognizeProblemsRequest,
     ResolveDriveConflictRequest, RunScienceToolRequest, SaveDriveOAuthConfigRequest,
     SaveSolutionEditRequest, SendChatMessageRequest, UpdateDriveSettingsRequest,
     UpsertProblemRequest,
@@ -508,15 +508,28 @@ async fn connect_state_to_mock_drive(state: &AppState, base_url: &str) {
     assert_eq!(conn.scopes, vec![DRIVE_FILE_SCOPE.to_string()]);
 }
 
+const SAMPLE_PDF_PROBLEM: &str = "Find the Gaussian integral over the positive real line.";
+
 fn minimal_pdf_bytes() -> Vec<u8> {
     use lopdf::dictionary;
 
     let mut doc = lopdf::Document::with_version("1.5");
+    let font_id = doc.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type1",
+        "BaseFont" => "Helvetica",
+    });
+    let contents_id = doc.add_object(lopdf::Stream::new(
+        dictionary! {},
+        format!("BT /F1 14 Tf 40 780 Td ({SAMPLE_PDF_PROBLEM}) Tj ET").into_bytes(),
+    ));
     let pages_id = doc.new_object_id();
     let page_id = doc.add_object(dictionary! {
         "Type" => "Page",
         "Parent" => pages_id,
         "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        "Resources" => dictionary! { "Font" => dictionary! { "F1" => font_id } },
+        "Contents" => contents_id,
     });
     let pages = dictionary! {
         "Type" => "Pages",
@@ -1205,7 +1218,11 @@ async fn test_mvp_math_12_steps_and_physics_3_cases_e2e() {
             recognition_mode: "printed_only".to_string(),
             page_range_start: None,
             page_range_end: None,
-            page_images: vec![],
+            page_images: vec![PageImagePayload {
+                page_number: 1,
+                png_base64: String::new(),
+                extracted_text: Some(SAMPLE_PDF_PROBLEM.into()),
+            }],
             cropped_region_png_base64: None,
         })
         .await
@@ -1264,6 +1281,7 @@ async fn test_mvp_math_12_steps_and_physics_3_cases_e2e() {
         .expect("step 6 conv");
     let chat_res = state
         .send_chat_message(&SendChatMessageRequest {
+            run_id: None,
             conversation_id: conv.id.clone(),
             document_id: math_doc_id.clone(),
             agent_profile_id: Some(mock_profile.id.clone()),

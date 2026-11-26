@@ -505,6 +505,7 @@ pub struct ChatMessage {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendChatMessageRequest {
+    pub run_id: Option<String>,
     pub conversation_id: String,
     pub document_id: String,
     pub agent_profile_id: Option<String>,

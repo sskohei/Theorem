@@ -7,6 +7,7 @@ import type {
   ChatMessage,
   Conversation,
   PermissionDecision,
+  SendChatMessageResult,
 } from "@/types/ipc";
 
 export interface PendingPermissionRequest {
@@ -40,6 +41,7 @@ interface ChatStoreState {
 
   sending: boolean;
   activeRunId: string | null;
+  sendingHere: boolean;
   streamingText: string;
   liveToolCalls: LiveToolCallItem[];
   pendingPermissions: PendingPermissionRequest[];
@@ -76,270 +78,305 @@ interface ChatStoreState {
   clearError: () => void;
 }
 
-export const useChatStore = create<ChatStoreState>((set, get) => ({
-  activeDocumentId: null,
-  conversations: [],
-  activeConversationId: null,
-  messages: [],
+interface ChatRun {
+  id: string;
+  documentId: string;
+  conversationId: string | null;
+  streamingText: string;
+  liveToolCalls: LiveToolCallItem[];
+  permissions: PendingPermissionRequest[];
+  error: ApiError | null;
+}
 
-  selectedProfileId: null,
-  selectedModel: null,
-  includeProblemContext: true,
-  includeSolutionContext: true,
+export const useChatStore = create<ChatStoreState>((set, get) => {
+  let documentRequest = 0;
+  let selection = 0;
+  let messageRequest = 0;
+  let run: ChatRun | null = null;
 
-  sending: false,
-  activeRunId: null,
-  streamingText: "",
-  liveToolCalls: [],
-  pendingPermissions: [],
-  error: null,
+  const isVisible = (target: ChatRun) =>
+    get().activeDocumentId === target.documentId
+    && get().activeConversationId === target.conversationId;
 
-  loadForDocument: async (documentId) => {
-    if (!documentId) {
+  const visibleRun = () => {
+    const visible = run && isVisible(run) ? run : null;
+    return {
+      sendingHere: visible !== null,
+      streamingText: visible?.streamingText ?? "",
+      liveToolCalls: visible?.liveToolCalls ?? [],
+      pendingPermissions: visible?.permissions ?? [],
+      error: visible?.error ?? null,
+    };
+  };
+
+  const refreshMessages = async (conversationId: string, currentSelection: number) => {
+    const request = ++messageRequest;
+    const current = () => currentSelection === selection && request === messageRequest;
+    try {
+      const messages = await tauriClient.listMessages(conversationId);
+      if (current()) set({ messages });
+    } catch (err) {
+      if (current()) set({ error: normalizeApiError(err) });
+    }
+  };
+
+  return {
+    activeDocumentId: null,
+    conversations: [],
+    activeConversationId: null,
+    messages: [],
+
+    selectedProfileId: null,
+    selectedModel: null,
+    includeProblemContext: true,
+    includeSolutionContext: true,
+
+    sending: false,
+    activeRunId: null,
+    sendingHere: false,
+    streamingText: "",    liveToolCalls: [],
+    pendingPermissions: [],
+    error: null,
+
+    loadForDocument: async (documentId) => {
+      const request = ++documentRequest;
+      const currentSelection = ++selection;
       set({
-        activeDocumentId: null,
+        activeDocumentId: documentId,
         conversations: [],
         activeConversationId: null,
         messages: [],
-        streamingText: "",
-        liveToolCalls: [],
+        sendingHere: false,
+        streamingText: "",        liveToolCalls: [],
         pendingPermissions: [],
         error: null,
       });
-      return;
-    }
+      if (!documentId) return;
 
-    set({ activeDocumentId: documentId, error: null });
-    try {
-      const conversations = await tauriClient.listConversations(documentId);
-      const firstId = conversations[0]?.id ?? null;
-      const messages = firstId ? await tauriClient.listMessages(firstId) : [];
-      set({
-        conversations,
-        activeConversationId: firstId,
-        messages,
-      });
-    } catch (err) {
-      set({ error: normalizeApiError(err) });
-    }
-  },
+      try {
+        const conversations = await tauriClient.listConversations(documentId);
+        if (request !== documentRequest) return;
+        const existing = get().conversations;
+        set({ conversations: [...existing, ...conversations.filter(
+          (conversation) => !existing.some((item) => item.id === conversation.id),
+        )] });
+        const first = conversations[0];
+        if (first && currentSelection === selection) await get().selectConversation(first.id);
+      } catch (err) {
+        if (currentSelection === selection) set({ error: normalizeApiError(err) });
+      }
+    },
 
-  selectConversation: async (conversationId) => {
-    set({ activeConversationId: conversationId, error: null });
-    try {
-      const messages = await tauriClient.listMessages(conversationId);
-      set({ messages });
-    } catch (err) {
-      set({ error: normalizeApiError(err) });
-    }
-  },
+    selectConversation: async (conversationId) => {
+      if (!get().conversations.some((conv) => conv.id === conversationId)) return;
+      const currentSelection = ++selection;
+      set({ activeConversationId: conversationId, messages: [] });
+      set(visibleRun());
+      await refreshMessages(conversationId, currentSelection);
+    },
 
-  createNewConversation: async (documentId, title = "新しいチャット", problemId, solutionId) => {
-    try {
-      const conv = await tauriClient.createConversation(documentId, title, problemId, solutionId);
-      set((s) => ({
-        conversations: [conv, ...s.conversations],
-        activeConversationId: conv.id,
-        messages: [],
+    createNewConversation: async (documentId, title = "新しいチャット", problemId, solutionId) => {
+      if (get().activeDocumentId !== documentId) return null;
+      const currentSelection = selection;
+      try {
+        const conv = await tauriClient.createConversation(documentId, title, problemId, solutionId);
+        if (get().activeDocumentId === documentId) {
+          set((state) => ({
+            conversations: [conv, ...state.conversations.filter((item) => item.id !== conv.id)],
+          }));
+          if (currentSelection === selection) {
+            ++selection;
+            set({ activeConversationId: conv.id, messages: [] });
+            set(visibleRun());
+          }
+        }
+        return conv;
+      } catch (err) {
+        if (currentSelection === selection) set({ error: normalizeApiError(err) });
+        return null;
+      }
+    },
+
+    deleteConversation: async (conversationId) => {
+      const documentId = get().activeDocumentId;
+      const currentSelection = selection;
+      try {
+        await tauriClient.deleteConversation(conversationId);
+        if (get().activeDocumentId !== documentId) return;
+        const remaining = get().conversations.filter((conv) => conv.id !== conversationId);
+        set({ conversations: remaining });
+        if (get().activeConversationId !== conversationId) return;
+        if (remaining[0]) {
+          await get().selectConversation(remaining[0].id);
+        } else {
+          ++selection;
+          set({ activeConversationId: null, messages: [] });
+          set(visibleRun());
+        }
+      } catch (err) {
+        if (currentSelection === selection) set({ error: normalizeApiError(err) });
+      }
+    },
+
+    setSelectedProfileId: (profileId) => set({ selectedProfileId: profileId, selectedModel: null }),
+    setSelectedModel: (model) => set({ selectedModel: model }),
+    setIncludeProblemContext: (include) => set({ includeProblemContext: include }),
+    setIncludeSolutionContext: (include) => set({ includeSolutionContext: include }),
+
+    sendMessage: async ({ documentId, contentMarkdown, referencedProblemId, attachedImages = [] }) => {
+      const state = get();
+      if (run || state.activeDocumentId !== documentId) return;
+
+      const target: ChatRun = {
+        id: crypto.randomUUID(),
+        documentId,
+        conversationId: state.activeConversationId,
+        streamingText: "",        liveToolCalls: [],
+        permissions: [],
         error: null,
-      }));
-      return conv;
-    } catch (err) {
-      set({ error: normalizeApiError(err) });
-      return null;
-    }
-  },
+      };
+      run = target;
+      set({ sending: true, activeRunId: target.id, ...visibleRun() });
 
-  deleteConversation: async (conversationId) => {
-    try {
-      await tauriClient.deleteConversation(conversationId);
-      const remaining = get().conversations.filter((c) => c.id !== conversationId);
-      const nextId =
-        get().activeConversationId === conversationId
-          ? (remaining[0]?.id ?? null)
-          : get().activeConversationId;
-      const messages = nextId ? await tauriClient.listMessages(nextId) : [];
-      set({ conversations: remaining, activeConversationId: nextId, messages });
-    } catch (err) {
-      set({ error: normalizeApiError(err) });
-    }
-  },
+      try {
+        let conversationId = target.conversationId;
+        if (!conversationId) {
+          const title = contentMarkdown.trim().slice(0, 28) || "新しいチャット";
+          const created = await get().createNewConversation(documentId, title, referencedProblemId ?? null, null);
+          if (!created) return;
+          conversationId = created.id;
+          target.conversationId = conversationId;
+        }
 
-  setSelectedProfileId: (profileId) => set({ selectedProfileId: profileId, selectedModel: null }),
-  setSelectedModel: (model) => set({ selectedModel: model }),
-  setIncludeProblemContext: (include) => set({ includeProblemContext: include }),
-  setIncludeSolutionContext: (include) => set({ includeSolutionContext: include }),
+        const optimisticUser: ChatMessage = {
+          id: target.id,
+          conversationId,
+          role: "user",
+          contentMarkdown: contentMarkdown.trim(),
+          status: "completed",
+          agentRunId: null,
+          referencedProblemId: referencedProblemId ?? null,
+          attachmentIds: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
 
-  sendMessage: async ({
-    documentId,
-    contentMarkdown,
-    referencedProblemId,
-    attachedImages = [],
-  }) => {
-    let convId = get().activeConversationId;
-    if (!convId) {
-      const title = contentMarkdown.trim().slice(0, 28) || "新しいチャット";
-      const created = await get().createNewConversation(
-        documentId,
-        title,
-        referencedProblemId ?? null,
-        null,
-      );
-      if (!created) return;
-      convId = created.id;
-    }
+        if (isVisible(target)) {
+          ++messageRequest;
+          set((current) => ({ ...visibleRun(), messages: [...current.messages, optimisticUser] }));
+        }
 
-    const optimisticUser: ChatMessage = {
-      id: `pending-user-${Date.now()}`,
-      conversationId: convId,
-      role: "user",
-      contentMarkdown: contentMarkdown.trim(),
-      status: "completed",
-      agentRunId: null,
-      referencedProblemId: referencedProblemId ?? null,
-      attachmentIds: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+        let result: SendChatMessageResult | undefined;
+        try {
+          result = await tauriClient.sendChatMessage({
+            runId: target.id,
+            conversationId,
+            documentId,
+            agentProfileId: state.selectedProfileId,
+            modelName: state.selectedModel,
+            contentMarkdown,
+            referencedProblemId: referencedProblemId ?? null,
+            includeProblemContext: state.includeProblemContext,
+            includeSolutionContext: state.includeSolutionContext,
+            attachedImages,
+          });
+        } catch (err) {
+          target.error ??= normalizeApiError(err);
+        }
+        if (isVisible(target)) {
+          set((current) => {
+            const messages = current.messages.filter((item) =>
+              item.id !== optimisticUser.id && item.id !== result?.userMessage.id
+              && item.id !== result?.assistantMessage.id);
+            if (result) messages.push(result.userMessage, result.assistantMessage);
+            return { ...visibleRun(), messages };
+          });
+          await refreshMessages(conversationId, selection);
+        }
+      } finally {
+        const visible = isVisible(target);
+        run = null;
+        set({ sending: false, activeRunId: null });
+        if (visible) {
+          set({ ...visibleRun(), liveToolCalls: target.liveToolCalls, error: target.error ?? get().error });
+        }
+      }
+    },
 
-    set((s) => ({
-      sending: true,
-      streamingText: "",
-      liveToolCalls: [],
-      activeRunId: null,
-      pendingPermissions: [],
-      messages: [...s.messages, optimisticUser],
-      error: null,
-    }));
+    cancelActiveRun: async () => {
+      const target = run;
+      if (!target || !isVisible(target)) return;
+      try {
+        await tauriClient.cancelAgentRun(target.id);
+      } catch (err) {
+        if (run === target && isVisible(target)) set({ error: normalizeApiError(err) });
+      }
+    },
 
-    try {
-      await tauriClient.sendChatMessage({
-        conversationId: convId,
-        documentId,
-        agentProfileId: get().selectedProfileId,
-        modelName: get().selectedModel,
-        contentMarkdown,
-        referencedProblemId: referencedProblemId ?? null,
-        includeProblemContext: get().includeProblemContext,
-        includeSolutionContext: get().includeSolutionContext,
-        attachedImages,
-      });
-      const latest = await tauriClient.listMessages(convId);
-      set({
-        sending: false,
-        activeRunId: null,
-        streamingText: "",
-        pendingPermissions: [],
-        messages: latest,
-      });
-    } catch (err) {
-      const latest = await tauriClient.listMessages(convId).catch(() => get().messages);
-      set({
-        sending: false,
-        activeRunId: null,
-        streamingText: "",
-        pendingPermissions: [],
-        messages: latest,
-        error: normalizeApiError(err),
-      });
-    }
-  },
+    respondPermission: async (runId, requestId, decision) => {
+      const target = run;
+      if (!target || target.id !== runId || !isVisible(target)) return;
+      target.permissions = target.permissions.filter((p) => p.requestId !== requestId);
+      set({ pendingPermissions: target.permissions });
+      try {
+        await tauriClient.respondAgentPermission(runId, requestId, decision);
+      } catch (err) {
+        if (run === target && isVisible(target)) set({ error: normalizeApiError(err) });
+      }
+    },
 
-  cancelActiveRun: async () => {
-    const runId = get().activeRunId;
-    if (!runId) return;
-    try {
-      await tauriClient.cancelAgentRun(runId);
-    } catch (err) {
-      set({ error: normalizeApiError(err) });
-    }
-  },
-
-  respondPermission: async (runId, requestId, decision) => {
-    set((s) => ({
-      pendingPermissions: s.pendingPermissions.filter((p) => p.requestId !== requestId),
-    }));
-    try {
-      await tauriClient.respondAgentPermission(runId, requestId, decision);
-    } catch (err) {
-      set({ error: normalizeApiError(err) });
-    }
-  },
-
-  handleAgentEvent: (envelope) => {
-    const ev = envelope.event;
-    if (!get().sending) return;
-
-    if (ev.type === "messageStarted") {
-      set({ activeRunId: envelope.runId });
-    } else if (ev.type === "textDelta") {
-      set((s) => ({
-        activeRunId: s.activeRunId ?? envelope.runId,
-        streamingText: s.streamingText + ev.text,
-      }));
-    } else if (ev.type === "toolCallStarted") {
-      set((s) => ({
-        activeRunId: s.activeRunId ?? envelope.runId,
-        liveToolCalls: [
-          ...s.liveToolCalls.filter((c) => c.callId !== ev.callId),
+    handleAgentEvent: ({ runId, event }) => {
+      const target = run;
+      if (!target || target.id !== runId) return;
+      if (event.type === "textDelta") {
+        target.streamingText += event.text;
+      } else if (event.type === "toolCallStarted") {
+        target.liveToolCalls = [
+          ...target.liveToolCalls.filter((call) => call.callId !== event.callId),
           {
-            callId: ev.callId,
-            server: ev.server,
-            toolName: ev.toolName,
-            arguments: ev.arguments,
+            callId: event.callId,
+            server: event.server,
+            toolName: event.toolName,
+            arguments: event.arguments,
             status: "running",
             progress: null,
             output: null,
           },
-        ],
-      }));
-    } else if (ev.type === "toolCallUpdated") {
-      set((s) => ({
-        liveToolCalls: s.liveToolCalls.map((c) =>
-          c.callId === ev.callId ? { ...c, progress: ev.progress } : c,
-        ),
-      }));
-    } else if (ev.type === "toolCallCompleted") {
-      set((s) => ({
-        liveToolCalls: s.liveToolCalls.map((c) =>
-          c.callId === ev.callId
-            ? {
-                ...c,
-                status: ev.succeeded ? "succeeded" : "failed",
-                output: ev.output,
-              }
-            : c,
-        ),
-      }));
-    } else if (ev.type === "permissionRequested") {
-      set((s) => ({
-        activeRunId: s.activeRunId ?? envelope.runId,
-        pendingPermissions: [
-          ...s.pendingPermissions,
-          {
-            runId: envelope.runId,
-            requestId: ev.requestId,
-            action: ev.action,
-            target: ev.target,
-            detail: ev.detail,
-          },
-        ],
-      }));
-    } else if (ev.type === "failed") {
-      set({
-        error: {
-          code: ev.code,
-          message: ev.message,
-          detail: ev.rateLimited
+        ];
+      } else if (event.type === "toolCallUpdated") {
+        target.liveToolCalls = target.liveToolCalls.map((call) =>
+          call.callId === event.callId ? { ...call, progress: event.progress } : call);
+      } else if (event.type === "toolCallCompleted") {
+        target.liveToolCalls = target.liveToolCalls.map((call) =>
+          call.callId === event.callId
+            ? { ...call, status: event.succeeded ? "succeeded" : "failed", output: event.output }
+            : call);
+      } else if (event.type === "permissionRequested") {
+        target.permissions = [...target.permissions, {
+          runId,
+          requestId: event.requestId,
+          action: event.action,
+          target: event.target,
+          detail: event.detail,
+        }];
+      } else if (event.type === "failed") {
+        target.error = {
+          code: event.code,
+          message: event.message,
+          detail: event.rateLimited
             ? "利用上限に達しました。自動リトライは行いません。"
-            : ev.authRequired
+            : event.authRequired
               ? "設定画面の「AIエージェント」から公式認証手順を確認してください。"
               : null,
           recoverable: true,
-        },
-      });
-    }
-  },
+        };
+      }
+      if (isVisible(target)) set(visibleRun());
+    },
 
-  clearError: () => set({ error: null }),
-}));
+    clearError: () => {
+      if (run && isVisible(run)) run.error = null;
+      set({ error: null });
+    },
+  };
+});

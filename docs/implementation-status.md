@@ -1,6 +1,6 @@
 # 実装・技術検証状況（Implementation Status）
 
-> **最終更新**: 2026-11-26
+> **最終更新**: 2026-11-27
 > **現在フェーズ**: **Phase 4（Google Drive 連携・MVP `#5`）実装・ローカル自動検証（Rust / Mock Drive HTTP サーバー / 大学数学 12 ステップ & 物理 3 事例 E2E / React Vitest / Python Science MCP 回帰 / Windows 11 `theorem.exe` ビルド・起動スモーク）完了**（実 Google アカウント OAuth 接続検証は `GOOGLE_OAUTH_CLIENT_ID` 未提供のため保留；未導入の Claude Code 実機接続も引き続き保留として記録。Phase 5 高度な学習機能 `#6` へ移行可能）
 > **誠実性ルール**: 未実装機能を完成済みと記載しない。モックテスト合格と外部サービス実接続確認を明確に区別する。外部認証が必要な項目は認証情報なしで「動作確認済み」にしない。
 
@@ -25,7 +25,7 @@
 | `docs/testing.md` | 作成済み (v1.0) | Rust/React/Python/統合テスト計画 |
 | `docs/development.md` | 更新済み (v1.4) | Phase 4 Google Drive ライブ検証コマンドおよび開発手順を反映 |
 | `docs/roadmap.md` | 更新済み (v1.3) | Phase 0〜6 計画・Phase 4 完了反映・GitHub Issue (`#1`〜`#7`) 対応 |
-| `docs/adr/` (ADR-0001〜0006) | 更新済み | **全 6 件 Accepted**（ADR-0004 を Phase 0 検証結果で確定） |
+| `docs/adr/` (ADR-0001〜0007) | 更新済み | **全 7 件 Accepted**（ADR-0004 を Phase 0 検証結果で確定） |
 | `poc/README.md` | 作成済み | Phase 0 実行可能 PoC の実行手順・実測レポート |
 | `schemas/`・`templates/` | 作成済み (Phase 2) | `recognition.v1.schema.json` / `solution.v1.schema.json`・検証済み Typst テンプレート 5 種 |
 
@@ -122,6 +122,26 @@
 2. **Claude Code 実機接続検証（保留）**: ローカル未導入およびサブスクリプション OAuth のサードパーティ規約制約あり。`ClaudeAdapter` では `official_harness` モードを規約保護のため明示ブロック（`terms_restricted`）し、明示オプトインの `api_key_keyring` モード（`--permission-mode plan --disallowedTools Bash,Write,Edit`）を実装済み。実機確認は `claude` CLI 導入可能環境で追試予定。
 3. **Antigravity ACP / 対話 GUI 目視確認**: `AcpAdapter` にてターン開始時のキャンセル後残留チャンクドレイン制御・`agent_thought_chunk` フィルタ・権限要求ブリッジ・`session/new`/`session/load` への `mcpServers` スコープ注入および `tool_call` 正規化を実装済み。Windows 11 での `theorem.exe` ビルド・起動スモークおよび OpenAI Codex 実機 E2E（Phase 2・Phase 3 Science MCP 連携）は通過済みだが、WebView2 上での Antigravity ACP 対話チャット・PDF 領域切り出し・OS D&D・Google Drive ブラウザ OAuth 往復の目視操作確認は `pnpm.cmd tauri dev` での最終確認を推奨。
 4. **配布戦略（Phase 6）**: Windows エンドユーザー向けに Python (`uv`) / Science MCP 環境および SIL OFL 日本語フォントをどう同梱・初期化するか Phase 6 で確定する。
+
+---
+
+## 6. Phase 2 レビュー修正（基準 `479b535`）
+
+Windows 11 Pro（ビルド 26300）で、Phase 2 のレビュー指摘 6 件を検証した。
+
+| 項目 | 回帰テストと結果 |
+|---|---|
+| 再認識 | Rust のアプリケーション経路と Mock Adapter で、同じ問題番号を持つ 2 ページの PDF を片側・切り出し・全体・再試行の順に認識した。確認済み問題と手修正、全問題 ID、解答 3 版、会話参照を保持した。同じページに既存候補が複数ある場合も、既存レコードと再起動後の内容が一致した。 |
+| FormulaDesk 移行・復元 | 一時ディレクトリに Phase 1 スキーマを作り、WAL にだけコミットした文書と添付を設定ごと移行した。失敗した準備からの再試行、既存 Theorem ライブラリの優先、旧 ZIP と新 ZIP の復元を確認した。実ユーザーのライブラリは検証に使用していない。 |
+| PDF 認識入力 | Vitest で認識タブを操作し、画像のみの 3 ページ PDF を PDF.js で描画した。IPC に 2〜3 ページの番号と対応する PNG の画素が渡り、切り出しは元ページを維持した。準備失敗では未送信、空入力では Rust 側でエージェント実行の作成前に拒否した。 |
+| チャット実行の相関 | UI から送信し、別実行の開始・デルタ・権限要求・失敗を交互に配信した。チャットに属する応答と権限要求のみが表示され、中断先と権限応答先が送信時の実行 ID と一致した。Rust の Mock Adapter でも IPC の実行 ID を永続化した。 |
+| 会話の切り替え | 文書・会話を A→B と切り替え、B→A の順で成功・失敗を返した。A の送信中または送信後の再読込中に B へ切り替えた場合も、B の選択と表示を維持した。 |
+| Typst の期限 | Windows 上で開始を確認したワーカーに 25 ms の期限を適用し、強制終了と回収後に正常な PDF を生成した。LaTeX 変換の構造化エラーとオフラインのファイル参照拒否も通過した。デスクトップ実行ファイルをワーカーモードで起動し、一時ディレクトリで 1 ページの PDF を生成した。 |
+
+- フロントエンド検査は `pnpm test`（21 件）、`pnpm typecheck`、`pnpm lint`、`pnpm build` が通過。
+- Rust は `cargo test`（21 件通過。実 Codex E2E とワーカー用エントリの 2 件は通常実行対象外）、`cargo fmt --all -- --check`、`cargo clippy --all-targets -- -D warnings` が通過。
+- Phase 4 を含む main へ統合した後、Windows 11 で再検証した。Rust 33 件、フロントエンド 27 件、Python 41 件が通過し、各フォーマット・lint・型検査とフロントエンドビルドも通過した。Science MCP のツール表示、SVG の PDF 埋め込み、Mock Drive の統合ワークフローを含む。
+- 実 AI ハーネスとの接続と WebView2 での対話操作は、このレビュー修正では未検証。
 
 ---
 

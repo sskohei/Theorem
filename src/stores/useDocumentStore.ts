@@ -16,6 +16,7 @@ interface DocumentViewerState {
   pageRangeEnd: number;
   extractedPageText: string;
   croppedPreviewUrl: string | null;
+  croppedPage: number | null;
 
   loadDocument: (documentId: string | null) => Promise<void>;
   setCurrentPage: (page: number) => void;
@@ -24,8 +25,10 @@ interface DocumentViewerState {
   rotateClockwise: () => void;
   setPageRange: (start: number, end: number) => void;
   setExtractedPageText: (text: string) => void;
-  setCroppedPreviewUrl: (url: string | null) => void;
+  setCroppedPreviewUrl: (url: string | null, page?: number) => void;
 }
+
+let documentLoad = 0;
 
 export const useDocumentStore = create<DocumentViewerState>((set) => ({
   detail: null,
@@ -41,8 +44,10 @@ export const useDocumentStore = create<DocumentViewerState>((set) => ({
   pageRangeEnd: 1,
   extractedPageText: "",
   croppedPreviewUrl: null,
+  croppedPage: null,
 
   loadDocument: async (documentId) => {
+    const request = ++documentLoad;
     if (!documentId) {
       set({
         detail: null,
@@ -52,12 +57,13 @@ export const useDocumentStore = create<DocumentViewerState>((set) => ({
         currentPage: 1,
         totalPages: 1,
         croppedPreviewUrl: null,
+        croppedPage: null,
         extractedPageText: "",
       });
       return;
     }
 
-    set({ loading: true, error: null, croppedPreviewUrl: null, extractedPageText: "" });
+    set({ detail: null, primaryBase64: null, loading: true, error: null, croppedPreviewUrl: null, croppedPage: null, extractedPageText: "" });
     try {
       const detail = await tauriClient.getDocumentDetail(documentId);
       const primaryId = detail.document.primaryAttachmentId;
@@ -66,6 +72,7 @@ export const useDocumentStore = create<DocumentViewerState>((set) => ({
         const bin = await tauriClient.readAttachmentBase64(primaryId);
         primaryBase64 = bin.base64Data;
       }
+      if (request !== documentLoad) return;
       const pages = detail.document.pageCount ?? 1;
       set({
         detail,
@@ -78,7 +85,7 @@ export const useDocumentStore = create<DocumentViewerState>((set) => ({
         rotation: 0,
       });
     } catch (err) {
-      set({ loading: false, error: normalizeApiError(err) });
+      if (request === documentLoad) set({ loading: false, error: normalizeApiError(err) });
     }
   },
 
@@ -87,7 +94,8 @@ export const useDocumentStore = create<DocumentViewerState>((set) => ({
   setTotalPages: (total) =>
     set((s) => ({
       totalPages: Math.max(1, total),
-      pageRangeEnd: Math.min(Math.max(1, s.pageRangeEnd), Math.max(1, total)),
+      pageRangeStart: Math.min(s.pageRangeStart, Math.max(1, total)),
+      pageRangeEnd: Math.min(s.pageRangeEnd, Math.max(1, total)),
     })),
   setZoom: (zoom) => set({ zoom: Math.min(3.0, Math.max(0.5, Number(zoom.toFixed(2)))) }),
   rotateClockwise: () => set((s) => ({ rotation: (s.rotation + 90) % 360 })),
@@ -98,5 +106,5 @@ export const useDocumentStore = create<DocumentViewerState>((set) => ({
       return { pageRangeStart: clampedStart, pageRangeEnd: clampedEnd };
     }),
   setExtractedPageText: (text) => set({ extractedPageText: text }),
-  setCroppedPreviewUrl: (url) => set({ croppedPreviewUrl: url }),
+  setCroppedPreviewUrl: (url, page) => set({ croppedPreviewUrl: url, croppedPage: url ? (page ?? null) : null }),
 }));

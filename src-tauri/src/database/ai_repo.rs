@@ -1,5 +1,5 @@
 use chrono::Utc;
-use sqlx::{Pool, Row, Sqlite};
+use sqlx::{Pool, Row, Sqlite, SqliteConnection, SqliteExecutor};
 use uuid::Uuid;
 
 use crate::domain::{
@@ -102,6 +102,13 @@ pub async fn recover_interrupted_state(pool: &Pool<Sqlite>) -> AppResult<()> {
 // ============================================================================
 
 pub async fn list_problems(pool: &Pool<Sqlite>, document_id: &str) -> AppResult<Vec<Problem>> {
+    list_problems_from(pool, document_id).await
+}
+
+async fn list_problems_from<'a>(
+    executor: impl SqliteExecutor<'a>,
+    document_id: &str,
+) -> AppResult<Vec<Problem>> {
     let rows = sqlx::query(
         "SELECT id, document_id, problem_number, subproblem_number, sort_order, subject_category,
                 field, statement_markdown, given_conditions_json, target_objective,
@@ -112,13 +119,20 @@ pub async fn list_problems(pool: &Pool<Sqlite>, document_id: &str) -> AppResult<
          ORDER BY sort_order ASC, created_at ASC",
     )
     .bind(document_id)
-    .fetch_all(pool)
+    .fetch_all(executor)
     .await?;
 
     Ok(rows.iter().map(row_to_problem).collect())
 }
 
 pub async fn get_problem(pool: &Pool<Sqlite>, problem_id: &str) -> AppResult<Problem> {
+    get_problem_from(pool, problem_id).await
+}
+
+async fn get_problem_from<'a>(
+    executor: impl SqliteExecutor<'a>,
+    problem_id: &str,
+) -> AppResult<Problem> {
     let row = sqlx::query(
         "SELECT id, document_id, problem_number, subproblem_number, sort_order, subject_category,
                 field, statement_markdown, given_conditions_json, target_objective,
@@ -128,7 +142,7 @@ pub async fn get_problem(pool: &Pool<Sqlite>, problem_id: &str) -> AppResult<Pro
          WHERE id = ?1",
     )
     .bind(problem_id)
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await?
     .ok_or_else(|| AppError::NotFound("対象の問題が見つかりません".into()))?;
 
@@ -137,6 +151,16 @@ pub async fn get_problem(pool: &Pool<Sqlite>, problem_id: &str) -> AppResult<Pro
 
 pub async fn upsert_problem(
     pool: &Pool<Sqlite>,
+    input: &UpsertProblemRequest,
+) -> AppResult<Problem> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let problem = upsert_problem_conn(&mut tx, input).await?;
+    tx.commit().await?;
+    Ok(problem)
+}
+
+async fn upsert_problem_conn(
+    conn: &mut SqliteConnection,
     input: &UpsertProblemRequest,
 ) -> AppResult<Problem> {
     let problem_number = input.problem_number.trim();
@@ -196,21 +220,21 @@ pub async fn upsert_problem(
         .bind(&ts)
         .bind(id)
         .bind(&input.document_id)
-        .execute(pool)
+        .execute(&mut *conn)
         .await?
         .rows_affected();
 
         if affected == 0 {
             return Err(AppError::NotFound("更新対象の問題が見つかりません".into()));
         }
-        return get_problem(pool, id).await;
+        return get_problem_from(conn, id).await;
     }
 
     let max_order: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(sort_order), -1) FROM problems WHERE document_id = ?1",
     )
     .bind(&input.document_id)
-    .fetch_one(pool)
+    .fetch_one(&mut *conn)
     .await?;
 
     let id = Uuid::new_v4().to_string();
@@ -237,80 +261,59 @@ pub async fn upsert_problem(
     .bind(&unc_json)
     .bind(if input.is_user_verified { 1 } else { 0 })
     .bind(&ts)
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
-    get_problem(pool, &id).await
+    get_problem_from(conn, &id).await
 }
 
-pub async fn replace_document_problems(
+/// Recognition only adds clearly new problems. Stored rows may already contain
+/// user edits and have solutions or conversations referencing their IDs.
+pub async fn add_recognized_problems(
     pool: &Pool<Sqlite>,
     document_id: &str,
     items: &[UpsertProblemRequest],
 ) -> AppResult<Vec<Problem>> {
-    let mut tx = pool.begin().await?;
-    sqlx::query("DELETE FROM problems WHERE document_id = ?1")
-        .bind(document_id)
-        .execute(&mut *tx)
-        .await?;
-
-    let ts = now_iso();
-    for (idx, item) in items.iter().enumerate() {
-        let cat = validate_subject_category(&item.subject_category)?;
-        let id = Uuid::new_v4().to_string();
-        let given_json = serde_json::to_string(&item.given_conditions)
-            .map_err(|e| AppError::Database(e.to_string()))?;
-        let pages_json = serde_json::to_string(&item.source_pages)
-            .map_err(|e| AppError::Database(e.to_string()))?;
-        let figs_json = serde_json::to_string(&item.figure_refs)
-            .map_err(|e| AppError::Database(e.to_string()))?;
-        let unc_json = serde_json::to_string(&item.uncertainties)
-            .map_err(|e| AppError::Database(e.to_string()))?;
-
-        sqlx::query(
-            "INSERT INTO problems
-             (id, document_id, problem_number, subproblem_number, sort_order, subject_category,
-              field, statement_markdown, given_conditions_json, target_objective,
-              source_pages_json, figure_refs_json, uncertainties_json, is_user_verified,
-              created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)",
-        )
-        .bind(&id)
-        .bind(document_id)
-        .bind(item.problem_number.trim())
-        .bind(
-            item.subproblem_number
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut existing = list_problems_from(&mut *tx, document_id).await?;
+    for (index, item) in items.iter().enumerate() {
+        let could_match = |number: &str, sub: Option<&str>, text: &str, pages: &[i64]| {
+            let sub = sub.map(str::trim).filter(|value| !value.is_empty());
+            let item_sub = item
+                .subproblem_number
                 .as_deref()
                 .map(str::trim)
-                .filter(|s| !s.is_empty()),
-        )
-        .bind(idx as i64)
-        .bind(cat)
-        .bind(
-            item.field
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty()),
-        )
-        .bind(item.statement_markdown.trim())
-        .bind(&given_json)
-        .bind(
-            item.target_objective
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty()),
-        )
-        .bind(&pages_json)
-        .bind(&figs_json)
-        .bind(&unc_json)
-        .bind(if item.is_user_verified { 1 } else { 0 })
-        .bind(&ts)
-        .execute(&mut *tx)
-        .await?;
+                .filter(|value| !value.is_empty());
+            let same_label = item.problem_number.trim() == number.trim() && item_sub == sub;
+            let same_text = item.statement_markdown.trim() == text.trim();
+            let compatible_pages = pages.is_empty()
+                || item.source_pages.is_empty()
+                || pages.iter().any(|page| item.source_pages.contains(page));
+            (same_label || same_text) && compatible_pages
+        };
+        let matches_existing = existing.iter().any(|problem| {
+            could_match(
+                &problem.problem_number,
+                problem.subproblem_number.as_deref(),
+                &problem.statement_markdown,
+                &problem.source_pages,
+            )
+        });
+        let ambiguous = items.iter().enumerate().any(|(other_index, other)| {
+            index != other_index
+                && could_match(
+                    &other.problem_number,
+                    other.subproblem_number.as_deref(),
+                    &other.statement_markdown,
+                    &other.source_pages,
+                )
+        });
+        if !matches_existing && !ambiguous {
+            existing.push(upsert_problem_conn(&mut tx, item).await?);
+        }
     }
-
     tx.commit().await?;
-    list_problems(pool, document_id).await
+    Ok(existing)
 }
 
 pub async fn delete_problem(pool: &Pool<Sqlite>, problem_id: &str) -> AppResult<()> {

@@ -35,6 +35,9 @@ vi.mock("@/services/tauriClient", async (importOriginal) => {
       listProblems: vi.fn(),
       listSolutions: vi.fn(),
       updateSettings: vi.fn(),
+      createConversation: vi.fn(),
+      sendChatMessage: vi.fn(),
+      listMessages: vi.fn(),
     },
   };
 });
@@ -188,6 +191,7 @@ describe("Theorem Phase 3 UI (CalculationsTab, Science MCP Settings & Chat Tool 
       activeConversationId: null,
       messages: [],
       sending: false,
+      sendingHere: false,
       activeRunId: null,
       streamingText: "",
       liveToolCalls: [],
@@ -319,13 +323,34 @@ describe("Theorem Phase 3 UI (CalculationsTab, Science MCP Settings & Chat Tool 
 
   it("displays live Science MCP tool calls inside ChatSidebar during streaming", async () => {
     const user = userEvent.setup();
+    const now = "2026-11-26T00:00:00Z";
+    let finish!: (error: Error) => void;
+    vi.mocked(tauriClient.sendChatMessage).mockImplementationOnce(
+      () => new Promise((_, reject) => { finish = reject; }),
+    );
+    vi.mocked(tauriClient.createConversation).mockResolvedValue({
+      id: "chat", documentId: "doc-phys", problemId: null, solutionId: null,
+      title: "Tool test", createdAt: now, updatedAt: now,
+    });
+    vi.mocked(tauriClient.listMessages).mockResolvedValue([]);
     render(<ChatSidebar />);
+    await user.type(screen.getByRole("textbox"), "Solve the ODE");
+    await user.click(screen.getByRole("button", { name: /送信/ }));
+    await waitFor(() => expect(tauriClient.sendChatMessage).toHaveBeenCalled());
+    const runId = vi.mocked(tauriClient.sendChatMessage).mock.lastCall![0].runId;
 
     act(() => {
-      useChatStore.setState({ sending: true });
+      useChatStore.getState().handleAgentEvent({
+        eventId: "other-tool",
+        runId: "solution-run",
+        sessionId: "sess-2",
+        messageId: null,
+        timestamp: now,
+        event: { type: "toolCallStarted", callId: "other", server: "science_mcp", toolName: "unrelated", arguments: {} },
+      });
       useChatStore.getState().handleAgentEvent({
         eventId: "ev-t1",
-        runId: "run-chat-1",
+        runId,
         sessionId: "sess-1",
         messageId: "msg-1",
         timestamp: "2026-11-26T00:00:00Z",
@@ -339,7 +364,7 @@ describe("Theorem Phase 3 UI (CalculationsTab, Science MCP Settings & Chat Tool 
       });
       useChatStore.getState().handleAgentEvent({
         eventId: "ev-t2",
-        runId: "run-chat-1",
+        runId,
         sessionId: "sess-1",
         messageId: "msg-1",
         timestamp: "2026-11-26T00:00:01Z",
@@ -358,5 +383,7 @@ describe("Theorem Phase 3 UI (CalculationsTab, Science MCP Settings & Chat Tool 
 
     await user.click(screen.getByRole("button", { name: /solve_ode/ }));
     expect(screen.getByText(/C1\*exp\(-t\)/)).toBeInTheDocument();
+    await act(async () => finish(new Error("finish test turn")));
+    await waitFor(() => expect(useChatStore.getState().sending).toBe(false));
   });
 });

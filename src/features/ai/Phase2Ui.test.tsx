@@ -11,7 +11,7 @@ import { useAiWorkspaceStore } from "@/stores/useAiWorkspaceStore";
 import { useChatStore } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
-import type { AgentProfile, Solution } from "@/types/ipc";
+import type { AgentEventPayload, AgentProfile, ChatMessage, Conversation, SendChatMessageResult, Solution } from "@/types/ipc";
 
 vi.mock("@/services/tauriClient", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/tauriClient")>();
@@ -27,6 +27,7 @@ vi.mock("@/services/tauriClient", async (importOriginal) => {
       createConversation: vi.fn(),
       sendChatMessage: vi.fn(),
       listMessages: vi.fn(),
+      listConversations: vi.fn(),
       cancelAgentRun: vi.fn(),
       respondAgentPermission: vi.fn(),
       saveSolutionEdit: vi.fn(),
@@ -99,9 +100,39 @@ const SAMPLE_SOL_V1: Solution = {
   updatedAt: "2026-11-26T00:00:00Z",
 };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((ok, fail) => { resolve = ok; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+function message(conversationId: string, contentMarkdown: string): ChatMessage {
+  return {
+    id: contentMarkdown, conversationId, contentMarkdown, role: "user", status: "completed",
+    agentRunId: null, referencedProblemId: null, attachmentIds: [],
+    createdAt: "2026-11-26T00:00:00Z", updatedAt: "2026-11-26T00:00:00Z",
+  };
+}
+
+function chatResult(runId: string, conversationId: string): SendChatMessageResult {
+  return {
+    runId, resumedExternalSession: false,
+    userMessage: message(conversationId, "sent"),
+    assistantMessage: { ...message(conversationId, "reply"), role: "assistant", agentRunId: runId },
+  };
+}
+
+function emit(runId: string, event: AgentEventPayload) {
+  useChatStore.getState().handleAgentEvent({
+    eventId: crypto.randomUUID(), runId, sessionId: "session", messageId: null,
+    timestamp: "2026-11-26T00:00:00Z", event,
+  });
+}
+
 describe("Theorem Phase 2 AI UI (Chat, Agent Settings, Solution Editor & Versions)", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     useLibraryStore.setState({ selectedDocumentId: "doc-1" });
     useAgentStore.setState({
       profiles: SAMPLE_PROFILES,
@@ -130,6 +161,7 @@ describe("Theorem Phase 2 AI UI (Chat, Agent Settings, Solution Editor & Version
       includeProblemContext: true,
       includeSolutionContext: true,
       sending: false,
+      sendingHere: false,
       activeRunId: null,
       streamingText: "",
       pendingPermissions: [],
@@ -153,48 +185,120 @@ describe("Theorem Phase 2 AI UI (Chat, Agent Settings, Solution Editor & Version
     vi.mocked(tauriClient.updateSettings).mockImplementation(async (s) => s);
   });
 
-  it("renders chat streaming deltas, interactive permission request card, and deny decision", async () => {
+  it("routes interleaved starts, deltas, permissions, failures and cancel to the submitted run", async () => {
     const user = userEvent.setup();
+    const turn = deferred<SendChatMessageResult>();
+    vi.mocked(tauriClient.sendChatMessage).mockReturnValue(turn.promise);
+    vi.mocked(tauriClient.listMessages).mockResolvedValue([]);
     vi.mocked(tauriClient.respondAgentPermission).mockResolvedValue(undefined);
     vi.mocked(tauriClient.cancelAgentRun).mockResolvedValue(undefined);
 
     render(<ChatSidebar />);
     expect(screen.getByText("モデル一覧: 未取得（既定使用）")).toBeInTheDocument();
-
+    await user.type(screen.getByRole("textbox"), "積分を説明してください");
+    await user.click(screen.getByRole("button", { name: "送信" }));
+    const input = vi.mocked(tauriClient.sendChatMessage).mock.calls[0]?.[0];
+    expect(input).toMatchObject({ documentId: "doc-1", conversationId: "conv-1", runId: expect.any(String) });
+    const id = input!.runId;
+    const permission = {
+      type: "permissionRequested", requestId: "req-42", action: "shell_command", target: null,
+      detail: "任意シェル実行要求",
+    } as const;
     act(() => {
-      useChatStore.setState({ sending: true });
-      useChatStore.getState().handleAgentEvent({
-        eventId: "e-1",
-        runId: "run-99",
-        sessionId: "sess-1",
-        messageId: "msg-1",
-        timestamp: "2026-11-26T00:00:00Z",
-        event: { type: "textDelta", text: "導出を開始します。" },
-      });
-      useChatStore.getState().handleAgentEvent({
-        eventId: "e-2",
-        runId: "run-99",
-        sessionId: "sess-1",
-        messageId: "msg-1",
-        timestamp: "2026-11-26T00:00:01Z",
-        event: {
-          type: "permissionRequested",
-          requestId: "req-42",
-          action: "shell_command",
-          target: "echo test",
-          detail: "任意シェル実行要求",
-        },
-      });
+      emit("recognition", { type: "messageStarted", role: "assistant" });
+      emit(id, { type: "textDelta", text: "導出を" });
+      emit("generation", { type: "textDelta", text: "別の生成" });
+      emit(id, { type: "messageStarted", role: "assistant" });
+      emit("recognition", permission);
+      emit(id, permission);
+      emit("generation", { type: "failed", code: "FAIL", message: "別の失敗", rateLimited: false, authRequired: false });
+      emit("generation", { type: "messageStarted", role: "assistant" });
+      emit(id, { type: "textDelta", text: "開始します。" });
     });
 
     expect(screen.getByText("導出を開始します。")).toBeInTheDocument();
-    expect(screen.getByRole("alertdialog", { name: "権限要求の確認" })).toBeInTheDocument();
-
+    expect(screen.queryByText("別の生成")).not.toBeInTheDocument();
+    expect(screen.queryByText("別の失敗")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("alertdialog", { name: "権限要求の確認" })).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "拒否（推奨）" }));
-    expect(tauriClient.respondAgentPermission).toHaveBeenCalledWith("run-99", "req-42", "deny");
-
+    expect(tauriClient.respondAgentPermission).toHaveBeenCalledWith(id, "req-42", "deny");
     await user.click(screen.getByRole("button", { name: "中断" }));
-    expect(tauriClient.cancelAgentRun).toHaveBeenCalledWith("run-99");
+    expect(tauriClient.cancelAgentRun).toHaveBeenCalledWith(id);
+    await act(async () => turn.resolve(chatResult(id, "conv-1")));
+    expect(useChatStore.getState().sending).toBe(false);
+  });
+
+  it.each(["success", "failure"])("keeps the latest conversation and document when older loads finish with %s", async (outcome) => {
+    const chat = useChatStore.getState();
+    const first = chat.conversations[0]!;
+    const second = { ...first, id: "conv-2" };
+    useChatStore.setState({ conversations: [first, second] });
+    const a = deferred<ChatMessage[]>();
+    const b = deferred<ChatMessage[]>();
+    vi.mocked(tauriClient.listMessages).mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise);
+    const selectA = chat.selectConversation(first.id);
+    const selectB = chat.selectConversation(second.id);
+    b.resolve([message(second.id, "B")]);
+    await selectB;
+    if (outcome === "success") a.resolve([message(first.id, "A")]);
+    else a.reject(new Error("A failed"));
+    await selectA;
+    expect(useChatStore.getState()).toMatchObject({
+      activeConversationId: second.id, messages: [message(second.id, "B")], error: null,
+    });
+
+    const docA = deferred<Conversation[]>();
+    const docB = deferred<Conversation[]>();
+    const firstInB = { ...second, documentId: "doc-2" };
+    vi.mocked(tauriClient.listConversations).mockReturnValueOnce(docA.promise).mockReturnValueOnce(docB.promise);
+    vi.mocked(tauriClient.listMessages).mockResolvedValue([message(second.id, "Doc B")]);
+    const loadA = chat.loadForDocument("doc-1");
+    const loadB = chat.loadForDocument("doc-2");
+    docB.resolve([firstInB]);
+    await loadB;
+    if (outcome === "success") docA.resolve([first]);
+    else docA.reject(new Error("Doc A failed"));
+    await loadA;
+    expect(useChatStore.getState()).toMatchObject({
+      activeDocumentId: "doc-2", activeConversationId: second.id,
+      conversations: [firstInB], messages: [message(second.id, "Doc B")], error: null,
+    });
+  });
+
+  it.each([
+    ["success", "during send"], ["failure", "during send"],
+    ["success", "during refresh"], ["failure", "during refresh"],
+  ])("keeps B visible when A finishes with %s after switching %s", async (outcome, when) => {
+    const chat = useChatStore.getState();
+    const a = chat.conversations[0]!;
+    const b = { ...a, id: "conv-2" };
+    useChatStore.setState({ conversations: [a, b] });
+    const turn = deferred<SendChatMessageResult>();
+    const aReload = deferred<ChatMessage[]>();
+    vi.mocked(tauriClient.sendChatMessage).mockReturnValue(turn.promise);
+    vi.mocked(tauriClient.listMessages).mockImplementation((id) =>
+      id === a.id ? aReload.promise : Promise.resolve([message(b.id, "B")]));
+    const send = chat.sendMessage({ documentId: a.documentId, contentMarkdown: "送信 A" });
+    const id = vi.mocked(tauriClient.sendChatMessage).mock.calls[0]![0].runId;
+    expect(tauriClient.sendChatMessage).toHaveBeenCalledWith(expect.objectContaining({ conversationId: a.id }));
+
+    const finishTurn = () => {
+      if (outcome === "success") turn.resolve(chatResult(id, a.id));
+      else turn.reject(new Error("send A failed"));
+    };
+    if (when === "during refresh") {
+      finishTurn();
+      await waitFor(() => expect(tauriClient.listMessages).toHaveBeenCalledWith(a.id));
+    }
+    await chat.selectConversation(b.id);
+    emit(id, { type: "textDelta", text: "A のストリーム" });
+    if (when === "during send") finishTurn();
+    aReload.resolve([message(a.id, "A")]);
+    await send;
+    expect(useChatStore.getState()).toMatchObject({
+      activeConversationId: b.id, messages: [message(b.id, "B")],
+      sending: false, sendingHere: false, streamingText: "", pendingPermissions: [], error: null,
+    });
   });
 
   it("shows honest verification/compliance badges in Agent Settings and PDF metadata toggles", async () => {

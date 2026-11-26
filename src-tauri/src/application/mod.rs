@@ -43,6 +43,7 @@ pub struct AppState {
 
 impl AppState {
     pub async fn initialize(data_root: PathBuf) -> AppResult<Self> {
+        crate::storage::migrate_legacy_library(&data_root).await?;
         let storage = AppStorage::initialize(data_root)?;
         let logger = DiagnosticLogger::new(&storage.logs_dir());
         let db = Database::connect(&storage.database_path()).await?;
@@ -437,10 +438,15 @@ impl AppState {
     }
 
     pub async fn restore_backup(&self, backup_rel_path: &str) -> AppResult<BootstrapState> {
+        let staged = self.storage.stage_backup_archive(backup_rel_path)?;
+        Database::connect(&staged.database_path())
+            .await?
+            .close()
+            .await;
         {
             let mut db_guard = self.db.write().await;
             db_guard.close().await;
-            let restore_res = self.storage.restore_backup_archive(backup_rel_path);
+            let restore_res = staged.install(&self.storage);
             let reopened = Database::connect(&self.storage.database_path()).await?;
             *db_guard = reopened;
             restore_res?;
@@ -469,19 +475,28 @@ mod tests {
     }
 
     fn sample_pdf_bytes() -> Vec<u8> {
+        sample_pdf_with_pages(1)
+    }
+
+    fn sample_pdf_with_pages(page_count: i64) -> Vec<u8> {
         let mut doc = lopdf::Document::with_version("1.5");
         let pages_id = doc.new_object_id();
-        let page_id = doc.add_object(dictionary! {
-            "Type" => "Page",
-            "Parent" => pages_id,
-            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
-        });
+        let page_ids = (0..page_count)
+            .map(|_| {
+                doc.add_object(dictionary! {
+                    "Type" => "Page",
+                    "Parent" => pages_id,
+                    "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+                })
+                .into()
+            })
+            .collect::<Vec<_>>();
         doc.objects.insert(
             pages_id,
             lopdf::Object::Dictionary(dictionary! {
                 "Type" => "Pages",
-                "Kids" => vec![page_id.into()],
-                "Count" => 1,
+                "Kids" => page_ids,
+                "Count" => page_count,
             }),
         );
         let catalog_id = doc.add_object(dictionary! {
@@ -802,43 +817,108 @@ mod tests {
             .expect("mock profile seeded")
             .clone();
 
-        // Import image problem
         let png_b64 = STANDARD.encode(sample_png_bytes());
+        let pdf_b64 = STANDARD.encode(sample_pdf_with_pages(2));
         let imported = state
-            .import_file_bytes(&math_id, None, "gaussian_integral.png", &png_b64)
+            .import_file_bytes(&math_id, None, "[TEST_REPEATED_PROBLEM].pdf", &pdf_b64)
             .await
-            .expect("import png");
+            .expect("import two-page PDF");
         let doc_id = imported.detail.document.id.clone();
+        let page = |page_number| crate::domain::PageImagePayload {
+            page_number,
+            png_base64: png_b64.clone(),
+            extracted_text: Some(format!("[TEST_PAGE_{page_number}]")),
+        };
+        let recognize = |range: Option<(i64, i64)>, page_images, crop| RecognizeProblemsRequest {
+            document_id: doc_id.clone(),
+            agent_profile_id: Some(mock_profile.id.clone()),
+            model_name: None,
+            recognition_mode: if range.is_some() {
+                "page_range"
+            } else {
+                "printed_only"
+            }
+            .into(),
+            page_range_start: range.map(|(start, _)| start),
+            page_range_end: range.map(|(_, end)| end),
+            page_images,
+            cropped_region_png_base64: crop,
+        };
 
-        // 1. Problem recognition via MockAdapter
+        for page_images in [
+            serde_json::json!([]),
+            serde_json::json!([{"pageNumber": 1, "pngBase64": "", "extractedText": "  "}]),
+        ] {
+            let input = serde_json::from_value(serde_json::json!({
+                "documentId": doc_id,
+                "agentProfileId": mock_profile.id,
+                "recognitionMode": "printed_only",
+                "pageImages": page_images,
+            }))
+            .expect("IPC request");
+            assert!(matches!(
+                state.recognize_problems(&input).await,
+                Err(AppError::Validation(_))
+            ));
+        }
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM agent_runs")
+                .fetch_one(state.db.read().await.pool())
+                .await
+                .expect("run count"),
+            0
+        );
         let rec = state
-            .recognize_problems(&RecognizeProblemsRequest {
-                document_id: doc_id.clone(),
-                agent_profile_id: Some(mock_profile.id.clone()),
-                model_name: Some("mock-math-pro".to_string()),
-                recognition_mode: "printed_only".to_string(),
-                page_range_start: None,
-                page_range_end: None,
-                page_images: Vec::new(),
-                cropped_region_png_base64: None,
-            })
+            .recognize_problems(&recognize(None, vec![page(1), page(2)], None))
             .await
-            .expect("recognize");
+            .expect("recognize both pages");
         assert!(rec.schema_issues.is_empty());
-        assert_eq!(rec.problems.len(), 1);
-        let prob_id = rec.problems[0].id.clone();
+        assert_eq!(rec.problems.len(), 2);
+        let first = &rec.problems[0];
+        let second = &rec.problems[1];
+        assert_eq!(first.problem_number, second.problem_number);
+        assert_eq!(first.source_pages, [1]);
+        assert_eq!(second.source_pages, [2]);
+        let prob_id = first.id.clone();
 
         // 2. Split & merge problem editing
         let after_split = state
             .split_problem(&prob_id, "前半の問題文", "後半の小問", Some("(2)"))
             .await
             .expect("split");
-        assert_eq!(after_split.len(), 2);
+        assert_eq!(after_split.len(), 3);
+        let split_part = after_split
+            .iter()
+            .find(|item| item.id != prob_id && item.id != second.id)
+            .expect("split part");
         let after_merge = state
-            .merge_problems(&after_split[0].id, &after_split[1].id)
+            .merge_problems(&prob_id, &split_part.id)
             .await
             .expect("merge");
-        assert_eq!(after_merge.len(), 1);
+        assert_eq!(after_merge.len(), 2);
+        let second = after_merge
+            .iter()
+            .find(|problem| problem.id == second.id)
+            .expect("other page");
+        let edit = crate::domain::UpsertProblemRequest {
+            id: Some(prob_id.clone()),
+            document_id: doc_id.clone(),
+            problem_number: first.problem_number.clone(),
+            subproblem_number: first.subproblem_number.clone(),
+            subject_category: first.subject_category.clone(),
+            field: first.field.clone(),
+            statement_markdown: "確認済みの問題文".into(),
+            given_conditions: vec!["手動で修正した条件".into()],
+            target_objective: first.target_objective.clone(),
+            source_pages: first.source_pages.clone(),
+            figure_refs: first.figure_refs.clone(),
+            uncertainties: first.uncertainties.clone(),
+            is_user_verified: true,
+        };
+        let edited = state
+            .upsert_problem(&edit)
+            .await
+            .expect("confirm first problem");
 
         // 3. Solution generation + Schema v1 validation + Typst PDF compilation (v1)
         let generated = state
@@ -917,8 +997,73 @@ mod tests {
             )
             .await
             .expect("conv");
+        // Each request takes the same application path as the recognition IPC command.
+        let requests = [
+            recognize(Some((2, 2)), vec![page(2)], None),
+            recognize(Some((2, 2)), vec![], Some(png_b64.clone())),
+            recognize(None, vec![page(1), page(2)], None),
+            recognize(None, vec![page(1), page(2)], None),
+        ];
+        for request in requests {
+            let rerun = state
+                .recognize_problems(&request)
+                .await
+                .expect("repeat recognition");
+            assert!(rerun.schema_issues.is_empty());
+            assert_eq!(
+                serde_json::to_value(rerun.problems).expect("serialize problems"),
+                serde_json::json!([edited, second])
+            );
+            let versions = state
+                .list_solutions(&doc_id, Some(&prob_id))
+                .await
+                .expect("versions");
+            assert_eq!(
+                versions
+                    .iter()
+                    .map(|version| &version.id)
+                    .collect::<Vec<_>>(),
+                all_versions
+                    .iter()
+                    .map(|version| &version.id)
+                    .collect::<Vec<_>>()
+            );
+            let conversations = state
+                .list_conversations(&doc_id)
+                .await
+                .expect("conversations");
+            assert_eq!(conversations[0].id, conv.id);
+            assert_eq!(
+                conversations[0].problem_id.as_deref(),
+                Some(prob_id.as_str())
+            );
+            assert_eq!(
+                conversations[0].solution_id.as_deref(),
+                Some(v3.solution.id.as_str())
+            );
+        }
+
+        let ambiguous = state
+            .upsert_problem(&crate::domain::UpsertProblemRequest {
+                id: None,
+                statement_markdown: "同じページ・同じ番号の別の手入力".into(),
+                ..edit
+            })
+            .await
+            .expect("add ambiguous candidate");
+        let repeated = state
+            .recognize_problems(&recognize(Some((1, 1)), vec![page(1)], None))
+            .await
+            .expect("recognize ambiguous candidate");
+        assert_eq!(
+            serde_json::to_value(repeated.problems).expect("serialize candidates"),
+            serde_json::json!([edited, second, ambiguous])
+        );
+
+        let chat_run_id = Uuid::new_v4().to_string();
         let turn1 = state
             .send_chat_message(&SendChatMessageRequest {
+                run_id: Some(chat_run_id.clone()),
                 conversation_id: conv.id.clone(),
                 document_id: doc_id.clone(),
                 agent_profile_id: Some(mock_profile.id.clone()),
@@ -931,12 +1076,18 @@ mod tests {
             })
             .await
             .expect("chat turn 1");
+        assert_eq!(turn1.run_id, chat_run_id);
+        assert_eq!(
+            turn1.assistant_message.agent_run_id.as_deref(),
+            Some(chat_run_id.as_str())
+        );
         assert_eq!(turn1.assistant_message.status, "completed");
         assert!(!turn1.assistant_message.content_markdown.is_empty());
 
         // Second turn reuses/resumes session
         let turn2 = state
             .send_chat_message(&SendChatMessageRequest {
+                run_id: None,
                 conversation_id: conv.id.clone(),
                 document_id: doc_id.clone(),
                 agent_profile_id: Some(mock_profile.id.clone()),
@@ -975,6 +1126,7 @@ mod tests {
         });
         let perm_turn = state_arc
             .send_chat_message(&SendChatMessageRequest {
+                run_id: None,
                 conversation_id: conv.id.clone(),
                 document_id: doc_id.clone(),
                 agent_profile_id: Some(mock_profile.id.clone()),
@@ -999,7 +1151,14 @@ mod tests {
         let restarted = AppState::initialize(dir.path().to_path_buf())
             .await
             .expect("re-init");
-        assert_eq!(restarted.list_problems(&doc_id).await.expect("p").len(), 1);
+        let after_restart = restarted
+            .list_problems(&doc_id)
+            .await
+            .expect("problems after restart");
+        assert_eq!(
+            serde_json::to_value(after_restart).expect("serialize restarted problems"),
+            serde_json::json!([edited, second, ambiguous])
+        );
         assert_eq!(
             restarted
                 .list_solutions(&doc_id, Some(&prob_id))
@@ -1130,6 +1289,7 @@ mod tests {
             .expect("conv");
         let chat = state
             .send_chat_message(&SendChatMessageRequest {
+                run_id: None,
                 conversation_id: conv.id.clone(),
                 document_id: doc_id.clone(),
                 agent_profile_id: Some(codex_profile.id.clone()),

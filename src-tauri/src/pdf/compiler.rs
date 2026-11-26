@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 use std::time::Duration as StdDuration;
 
 use chrono::{Datelike, Timelike, Utc};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use typst::diag::{FileError, FileResult};
 use typst::foundations::{Bytes, Datetime, Duration};
@@ -25,6 +26,9 @@ const TEMPLATE_CONCISE: &str = include_str!("../../../templates/concise.typ");
 const TEMPLATE_DETAILED: &str = include_str!("../../../templates/detailed.typ");
 
 const COMPILE_TIMEOUT_SECS: u64 = 20;
+
+mod worker;
+pub use worker::run_pdf_worker_if_requested;
 
 /// Strictly sandboxed in-memory Typst World:
 /// - Offline only (explicitly denies `VirtualRoot::Package(_)`)
@@ -204,7 +208,7 @@ pub fn compile_world_sync(world: &SandboxedWorld) -> Result<PagedDocument, Strin
     })
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CompiledSolutionPdf {
     pub typst_source: String,
     pub pdf_bytes: Vec<u8>,
@@ -220,7 +224,7 @@ pub struct CompilePdfMetadata<'a> {
     pub generated_at: &'a str,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PdfArtifactInput {
     pub relative_path: String,
     pub virtual_path: String,
@@ -237,69 +241,52 @@ pub async fn compile_solution_to_pdf(
     meta: &CompilePdfMetadata<'_>,
     artifacts: Vec<PdfArtifactInput>,
 ) -> Result<CompiledSolutionPdf, PdfCompileFailure> {
-    let json_owned = solution_json.clone();
-    let settings_owned = pdf_settings.clone();
-    let doc_title = meta.document_title.to_string();
-    let prob_label = meta.problem_label.map(ToString::to_string);
-    let prob_statement = meta.problem_statement.map(ToString::to_string);
-    let version_number = meta.version_number;
-    let model_name = meta.model_name.map(ToString::to_string);
-    let generated_at = meta.generated_at.to_string();
-
-    let task = tokio::task::spawn_blocking(move || {
-        let fonts = cached_fonts();
-        let mut virtual_artifacts: HashMap<String, Vec<u8>> = HashMap::new();
-        for art in &artifacts {
-            virtual_artifacts.insert(art.virtual_path.clone(), art.bytes.clone());
-        }
-
-        let typst_source = render_solution_typst(
-            &json_owned,
-            &settings_owned,
-            &CompilePdfMetadata {
-                document_title: &doc_title,
-                problem_label: prob_label.as_deref(),
-                problem_statement: prob_statement.as_deref(),
-                version_number,
-                model_name: model_name.as_deref(),
-                generated_at: &generated_at,
-            },
-            &artifacts,
-            fonts,
-        )?;
-
-        let world = SandboxedWorld::new(typst_source.clone(), virtual_artifacts, fonts.clone())
-            .map_err(PdfCompileFailure::Compile)?;
-        let paged = compile_world_sync(&world).map_err(PdfCompileFailure::Compile)?;
-        let page_count = paged.pages().len();
-        let pdf_bytes = typst_pdf::pdf(&paged, &PdfOptions::default()).map_err(|errs| {
-            PdfCompileFailure::Compile(
-                errs.iter()
-                    .map(|e| e.message.to_string())
-                    .collect::<Vec<_>>()
-                    .join("; "),
-            )
-        })?;
-
-        Ok(CompiledSolutionPdf {
-            typst_source,
-            pdf_bytes,
-            page_count,
-        })
-    });
-
-    match tokio::time::timeout(StdDuration::from_secs(COMPILE_TIMEOUT_SECS), task).await {
-        Ok(Ok(res)) => res,
-        Ok(Err(join_err)) => Err(PdfCompileFailure::Compile(format!(
-            "PDF コンパイルワーカーエラー: {join_err}"
-        ))),
-        Err(_) => Err(PdfCompileFailure::Compile(format!(
-            "PDF コンパイルがタイムアウトしました（上限 {COMPILE_TIMEOUT_SECS} 秒）"
-        ))),
-    }
+    let request = worker::PdfRequest {
+        solution: solution_json,
+        settings: pdf_settings,
+        document_title: meta.document_title,
+        problem_label: meta.problem_label,
+        problem_statement: meta.problem_statement,
+        version_number: meta.version_number,
+        model_name: meta.model_name,
+        generated_at: meta.generated_at,
+        artifacts,
+    };
+    worker::compile(request, StdDuration::from_secs(COMPILE_TIMEOUT_SECS)).await
 }
 
-#[derive(Debug)]
+fn compile_sync(
+    solution: &Value,
+    settings: &PdfSettings,
+    meta: &CompilePdfMetadata<'_>,
+    artifacts: Vec<PdfArtifactInput>,
+) -> Result<CompiledSolutionPdf, PdfCompileFailure> {
+    let fonts = cached_fonts();
+    let typst_source = render_solution_typst(solution, settings, meta, &artifacts, fonts)?;
+    let virtual_files = artifacts
+        .into_iter()
+        .map(|artifact| (artifact.virtual_path, artifact.bytes))
+        .collect();
+    let world = SandboxedWorld::new(typst_source.clone(), virtual_files, fonts.clone())
+        .map_err(PdfCompileFailure::Compile)?;
+    let paged = compile_world_sync(&world).map_err(PdfCompileFailure::Compile)?;
+    let page_count = paged.pages().len();
+    let pdf_bytes = typst_pdf::pdf(&paged, &PdfOptions::default()).map_err(|errs| {
+        PdfCompileFailure::Compile(
+            errs.iter()
+                .map(|e| e.message.to_string())
+                .collect::<Vec<_>>()
+                .join("; "),
+        )
+    })?;
+    Ok(CompiledSolutionPdf {
+        typst_source,
+        pdf_bytes,
+        page_count,
+    })
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum PdfCompileFailure {
     Latex(Vec<LatexConversionError>),
     Compile(String),

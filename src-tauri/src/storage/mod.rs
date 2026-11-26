@@ -1,5 +1,10 @@
+mod legacy;
+
+pub(crate) use legacy::migrate_legacy_library;
+
+use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
@@ -15,6 +20,8 @@ use crate::security::{normalize_relative_path, resolve_under_root};
 const SETTINGS_REL_PATH: &str = "settings.json";
 const BACKUPS_DIR_REL: &str = "backups";
 const DATABASE_REL_PATH: &str = "database/theorem.db";
+const LEGACY_DATABASE_REL_PATH: &str = "database/formuladesk.db";
+const LIBRARY_FOLDERS: [&str; 4] = ["attachments", "thumbnails", "sources", "templates"];
 
 #[derive(Debug, Clone)]
 pub struct AppStorage {
@@ -182,7 +189,7 @@ impl AppStorage {
             }
 
             // 3. attachments/, thumbnails/, sources/, templates/
-            for folder in ["attachments", "thumbnails", "sources", "templates"] {
+            for folder in LIBRARY_FOLDERS {
                 let abs = self.resolve(folder)?;
                 if abs.exists() {
                     add_dir_to_zip(&canonical_root, &abs, &mut zip, options)?;
@@ -238,81 +245,137 @@ impl AppStorage {
         Ok(items)
     }
 
-    /// Validates and extracts a backup archive safely into managed storage.
-    /// Rejects any ZIP-slip traversal entries or unexpected paths outside allowed roots.
-    pub fn restore_backup_archive(&self, backup_rel_path: &str) -> AppResult<()> {
+    /// Fully extracts and validates archive paths before touching the current library.
+    pub(crate) fn stage_backup_archive(&self, backup_rel_path: &str) -> AppResult<StagedBackup> {
         let archive_path = self.resolve(backup_rel_path)?;
-        if !archive_path.exists() {
-            return Err(AppError::NotFound(format!(
-                "バックアップファイルが見つかりません: {backup_rel_path}"
-            )));
-        }
+        let mut archive = ZipArchive::new(File::open(archive_path)?)
+            .map_err(|e| AppError::Backup(e.to_string()))?;
+        let staging = tempfile::tempdir_in(self.resolve("tmp")?)?;
+        let mut seen = HashSet::new();
+        let mut files = Vec::new();
 
-        let file = File::open(&archive_path)?;
-        let mut archive = ZipArchive::new(file).map_err(|e| AppError::Backup(e.to_string()))?;
-
-        // First pass: validate EVERY entry before modifying any disk state
-        let mut has_database = false;
-        let mut entries_to_restore: Vec<(usize, String)> = Vec::new();
         for i in 0..archive.len() {
-            let entry = archive
+            let mut entry = archive
                 .by_index(i)
                 .map_err(|e| AppError::Backup(e.to_string()))?;
+            let norm = normalize_relative_path(entry.name())?;
+            if norm
+                .split('/')
+                .any(|component| component.contains(':') || component.ends_with(['.', ' ']))
+            {
+                return Err(AppError::Security("Invalid backup path component".into()));
+            }
             if entry.is_dir() {
                 continue;
             }
-            let norm = normalize_relative_path(entry.name())?;
+            let norm = if norm == LEGACY_DATABASE_REL_PATH {
+                DATABASE_REL_PATH.to_string()
+            } else {
+                norm
+            };
             let allowed = norm == DATABASE_REL_PATH
                 || norm == SETTINGS_REL_PATH
-                || norm.starts_with("attachments/")
-                || norm.starts_with("thumbnails/")
-                || norm.starts_with("sources/")
-                || norm.starts_with("templates/");
-            if !allowed {
+                || norm
+                    .split_once('/')
+                    .is_some_and(|(root, _)| LIBRARY_FOLDERS.contains(&root));
+            if !allowed || !seen.insert(norm.to_lowercase()) {
                 return Err(AppError::Security(format!(
-                    "バックアップ内に許可されていないパスが含まれています: {norm}"
+                    "Invalid or duplicate backup path: {norm}"
                 )));
             }
-            if norm == DATABASE_REL_PATH {
-                has_database = true;
+            let target = staging.path().join(&norm);
+            fs::create_dir_all(
+                target
+                    .parent()
+                    .ok_or_else(|| AppError::Backup("Invalid backup path".into()))?,
+            )?;
+            let mut output = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(target)?;
+            io::copy(&mut entry, &mut output)?;
+            output.sync_all()?;
+            if norm != DATABASE_REL_PATH {
+                files.push(norm);
             }
-            entries_to_restore.push((i, norm));
         }
 
-        if !has_database {
+        if !seen.contains(DATABASE_REL_PATH) {
             return Err(AppError::Backup(
-                "バックアップに theorem.db が含まれていません".into(),
+                "The backup does not contain a library database".into(),
             ));
         }
+        if seen.contains(SETTINGS_REL_PATH) {
+            let staged_storage = AppStorage {
+                root: staging.path().to_path_buf(),
+            };
+            staged_storage.load_settings()?;
+        }
+        // Commit the DB last, after all file references can be resolved.
+        files.push(DATABASE_REL_PATH.into());
+        Ok(StagedBackup { staging, files })
+    }
+}
 
-        // Remove stale WAL/SHM files before replacing database (wait briefly on Windows for SQLite worker thread teardown)
-        for suffix in ["-wal", "-shm"] {
-            let side = PathBuf::from(format!("{}{}", self.database_path().display(), suffix));
-            if side.exists() {
-                for attempt in 0..15 {
-                    match fs::remove_file(&side) {
-                        Ok(()) => break,
-                        Err(err) if is_windows_transient_lock(&err) && attempt < 14 => {
-                            std::thread::sleep(std::time::Duration::from_millis(
-                                25 * (attempt + 1),
-                            ));
-                        }
-                        Err(_) => break,
-                    }
-                }
+#[derive(Debug)]
+pub(crate) struct StagedBackup {
+    staging: tempfile::TempDir,
+    files: Vec<String>,
+}
+
+impl StagedBackup {
+    pub fn database_path(&self) -> PathBuf {
+        self.staging.path().join(DATABASE_REL_PATH)
+    }
+
+    pub fn install(&self, storage: &AppStorage) -> AppResult<()> {
+        let rollback = tempfile::tempdir_in(storage.resolve("tmp")?)?;
+        let targets = self
+            .files
+            .iter()
+            .map(|file| storage.resolve(file))
+            .collect::<AppResult<Vec<_>>>()?;
+        // Capture all overwritten files before the first replacement.
+        for (index, target) in targets.iter().enumerate() {
+            if target.exists() {
+                fs::copy(target, rollback.path().join(index.to_string()))?;
             }
         }
-
-        // Second pass: atomic restore of each entry
-        for (idx, rel_path) in entries_to_restore {
-            let mut entry = archive
-                .by_index(idx)
-                .map_err(|e| AppError::Backup(e.to_string()))?;
-            let mut buf = Vec::new();
-            entry.read_to_end(&mut buf)?;
-            self.write_atomic(&rel_path, &buf)?;
+        for suffix in ["-wal", "-shm"] {
+            let side = storage.resolve(&format!("{DATABASE_REL_PATH}{suffix}"))?;
+            if side.exists() {
+                // The caller checkpoints and closes the pool before installing.
+                if suffix == "-wal" && side.metadata().is_ok_and(|meta| meta.len() != 0) {
+                    return Err(AppError::Backup(
+                        "Current database WAL has not been checkpointed".into(),
+                    ));
+                }
+                retry_file_operation(|| match fs::remove_file(&side) {
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                    result => result,
+                })?;
+            }
         }
-
+        for (index, (file, target)) in self.files.iter().zip(&targets).enumerate() {
+            let result = (|| -> AppResult<()> {
+                let parent = target
+                    .parent()
+                    .ok_or_else(|| AppError::Backup("Invalid backup destination".into()))?;
+                fs::create_dir_all(parent)?;
+                replace_file_atomic(&self.staging.path().join(file), target)
+            })();
+            if let Err(error) = result {
+                for (old_index, old_target) in targets[..index].iter().enumerate().rev() {
+                    let old = rollback.path().join(old_index.to_string());
+                    if old.exists() {
+                        replace_file_atomic(&old, old_target)?;
+                    } else {
+                        fs::remove_file(old_target)?;
+                    }
+                }
+                return Err(error);
+            }
+        }
         Ok(())
     }
 }
@@ -355,6 +418,21 @@ pub fn write_bytes_atomic_absolute(target: &Path, bytes: &[u8]) -> AppResult<()>
 fn is_windows_transient_lock(err: &std::io::Error) -> bool {
     matches!(err.raw_os_error(), Some(5) | Some(32) | Some(33))
         || err.kind() == std::io::ErrorKind::PermissionDenied
+}
+
+pub(super) fn retry_file_operation<T>(
+    mut operation: impl FnMut() -> io::Result<T>,
+) -> io::Result<T> {
+    let mut delay = 25;
+    loop {
+        match operation() {
+            Err(error) if cfg!(windows) && is_windows_transient_lock(&error) && delay <= 250 => {
+                std::thread::sleep(std::time::Duration::from_millis(delay));
+                delay += 25;
+            }
+            result => return result,
+        }
+    }
 }
 
 fn replace_file_atomic(tmp_path: &Path, target: &Path) -> AppResult<()> {
@@ -501,7 +579,7 @@ mod tests {
             zip.finish().expect("finish");
         }
         let err = storage
-            .restore_backup_archive("backups/malicious.zip")
+            .stage_backup_archive("backups/malicious.zip")
             .expect_err("must reject traversal entry");
         assert!(matches!(err, AppError::Security(_)));
     }

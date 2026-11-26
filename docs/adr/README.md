@@ -11,9 +11,10 @@
 | [0001](./0001-desktop-stack-tauri-react-rust.md) | デスクトップアプリ基盤としての Tauri v2 + React / TypeScript + Rust 採用 | Accepted | 2026-11-25 |
 | [0002](./0002-external-ai-harness-and-adapter-layer.md) | 外部公式 AI ハーネスの子プロセス統合と共通アダプター層（ハイブリッドプロトコル） | Accepted | 2026-11-25 |
 | [0003](./0003-local-first-sqlite-and-filesystem-storage.md) | ローカルファースト設計：SQLite メタデータ管理とファイルシステム分離 | Accepted | 2026-11-25 |
-| [0004](./0004-typst-pdf-generation-and-latex-conversion.md) | Typst による PDF 生成と LaTeX→Typst 変換層（Phase 0 検証確定） | Accepted | 2026-11-25 |
+| [0004](./0004-typst-pdf-generation-and-latex-conversion.md) | Typst による PDF 生成と LaTeX→Typst 変換層（Phase 0 検証確定） | Accepted | 2026-11-26 |
 | [0005](./0005-science-mcp-server-python-uv.md) | Science MCP Server（Python / uv / AST 安全パーサー）の採用 | Accepted | 2026-11-25 |
 | [0006](./0006-google-drive-export-oauth-drive-file.md) | Google Drive のエクスポート用途限定と OAuth 2.0 PKCE + `drive.file` スコープ採用 | Accepted | 2026-11-25 |
+| [0007](./0007-phase2-persistence-and-request-identity.md) | Phase 2 のライブラリ移行・再認識・チャット実行の相関 | Accepted | 2026-11-26 |
 
 ---
 

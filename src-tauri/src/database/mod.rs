@@ -4,11 +4,10 @@ pub mod library_repo;
 pub mod science_repo;
 
 use std::path::Path;
-use std::str::FromStr;
 use std::time::Duration;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{Pool, Sqlite};
+use sqlx::{Connection, Pool, Sqlite, SqliteConnection};
 
 use crate::error::{AppError, AppResult};
 
@@ -21,8 +20,8 @@ impl Database {
     /// Connects to SQLite with WAL mode, `PRAGMA foreign_keys = ON`, 5s busy timeout,
     /// and applies embedded `sqlx` migrations.
     pub async fn connect(db_path: &Path) -> AppResult<Self> {
-        let url = format!("sqlite://{}", db_path.to_string_lossy().replace('\\', "/"));
-        let opts = SqliteConnectOptions::from_str(&url)?
+        let opts = SqliteConnectOptions::new()
+            .filename(db_path)
             .create_if_missing(true)
             .foreign_keys(true)
             .journal_mode(SqliteJournalMode::Wal)
@@ -64,12 +63,10 @@ impl Database {
         if dest.exists() {
             let _ = std::fs::remove_file(dest);
         }
-        let escaped = dest
-            .to_string_lossy()
-            .replace('\\', "/")
-            .replace('\'', "''");
-        let sql = format!("VACUUM INTO '{escaped}'");
-        sqlx::query(&sql).execute(&self.pool).await?;
+        sqlx::query("VACUUM INTO ?")
+            .bind(dest.to_string_lossy().as_ref())
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -95,4 +92,19 @@ impl Database {
         }
         Ok(())
     }
+}
+
+/// Captures committed legacy pages (including WAL) without running migrations on the source.
+pub(crate) async fn snapshot_legacy_database(source: &Path, dest: &Path) -> AppResult<()> {
+    let opts = SqliteConnectOptions::new()
+        .filename(source)
+        .read_only(true)
+        .busy_timeout(Duration::from_secs(5));
+    let mut connection = SqliteConnection::connect_with(&opts).await?;
+    sqlx::query("VACUUM INTO ?")
+        .bind(dest.to_string_lossy().as_ref())
+        .execute(&mut connection)
+        .await?;
+    connection.close().await?;
+    Ok(())
 }

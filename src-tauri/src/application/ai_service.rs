@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use chrono::Utc;
@@ -227,29 +229,78 @@ impl AppState {
             (detail, cat)
         };
 
-        let (profile, explicit_api_key) = self
-            .resolve_profile_for_purpose("extraction", req.agent_profile_id.as_deref())
-            .await?;
+        let page_range = match (req.page_range_start, req.page_range_end) {
+            (Some(start), Some(end))
+                if start >= 1
+                    && end >= start
+                    && doc_detail
+                        .document
+                        .page_count
+                        .is_none_or(|count| end <= count) =>
+            {
+                Some((start, end))
+            }
+            (None, None) => None,
+            _ => {
+                return Err(AppError::Validation(
+                    "PDF のページ範囲が正しくありません".into(),
+                ));
+            }
+        };
+        let crop = req.cropped_region_png_base64.as_deref().map(str::trim);
+        let mut images = Vec::new();
+        let mut extracted_texts = Vec::new();
+        let mut input_pages = BTreeSet::new();
+        let valid_page = |number| {
+            number >= 1
+                && doc_detail
+                    .document
+                    .page_count
+                    .is_none_or(|count| number <= count)
+                && page_range.is_none_or(|(start, end)| (start..=end).contains(&number))
+        };
 
-        // Assemble image inputs: cropped region > PDF page PNGs > original image attachment
-        let mut images: Vec<AgentImageInput> = Vec::new();
-        let mut extracted_texts: Vec<(i64, String)> = Vec::new();
-
-        if let Some(ref crop_b64) = req.cropped_region_png_base64
-            && !crop_b64.trim().is_empty()
-        {
-            let bytes = STANDARD.decode(crop_b64.trim()).map_err(|_| {
-                AppError::Validation("切り出し領域 PNG のデコードに失敗しました".into())
+        if let Some(crop) = crop {
+            let Some((page, end)) = page_range else {
+                return Err(AppError::Validation(
+                    "切り出し元のページ番号を指定してください".into(),
+                ));
+            };
+            if page != end || crop.is_empty() {
+                return Err(AppError::Validation(
+                    "切り出し画像またはページ番号が正しくありません".into(),
+                ));
+            }
+            let bytes = STANDARD.decode(crop).map_err(|_| {
+                AppError::Validation("切り出し PNG のデコードに失敗しました".into())
             })?;
             images.push(AgentImageInput {
-                filename: "cropped-region.png".to_string(),
+                filename: format!("page-{page:03}-crop.png"),
                 mime_type: "image/png".to_string(),
                 bytes,
             });
+            input_pages.insert(page);
         } else if !req.page_images.is_empty() {
             for p in &req.page_images {
-                if !p.png_base64.trim().is_empty() {
-                    let bytes = STANDARD.decode(p.png_base64.trim()).map_err(|_| {
+                let png = p.png_base64.trim();
+                let text = p
+                    .extracted_text
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|txt| !txt.is_empty());
+                if !valid_page(p.page_number) || !input_pages.insert(p.page_number) {
+                    return Err(AppError::Validation(
+                        "認識対象のページ番号が範囲外か重複しています".into(),
+                    ));
+                }
+                if png.is_empty() && text.is_none() {
+                    return Err(AppError::Validation(format!(
+                        "ページ {} に認識対象の画像またはテキストがありません",
+                        p.page_number
+                    )));
+                }
+                if !png.is_empty() {
+                    let bytes = STANDARD.decode(png).map_err(|_| {
                         AppError::Validation(format!(
                             "ページ {} の PNG デコードに失敗しました",
                             p.page_number
@@ -261,8 +312,8 @@ impl AppState {
                         bytes,
                     });
                 }
-                if let Some(ref txt) = p.extracted_text {
-                    extracted_texts.push((p.page_number, txt.clone()));
+                if let Some(text) = text {
+                    extracted_texts.push((p.page_number, text.to_string()));
                 }
             }
         } else if let Some(ref primary_id) = doc_detail.document.primary_attachment_id
@@ -270,24 +321,43 @@ impl AppState {
             && att.mime_type.starts_with("image/")
         {
             let bytes = self.storage.read_bytes(&att.relative_path)?;
-            images.push(AgentImageInput {
-                filename: att.original_filename.clone(),
-                mime_type: att.mime_type.clone(),
-                bytes,
-            });
+            if !bytes.is_empty() {
+                images.push(AgentImageInput {
+                    filename: att.original_filename.clone(),
+                    mime_type: att.mime_type.clone(),
+                    bytes,
+                });
+                input_pages.insert(1);
+            }
         }
 
-        let page_range = match (req.page_range_start, req.page_range_end) {
-            (Some(s), Some(e)) => Some((s, e)),
-            _ => None,
-        };
+        if input_pages.is_empty() {
+            return Err(AppError::Validation(
+                "認識対象の画像またはページテキストを指定してください".into(),
+            ));
+        }
+        if let Some((start, end)) = page_range
+            && input_pages.len() as i64 != end - start + 1
+        {
+            return Err(AppError::Validation(
+                "指定範囲の一部のページに認識入力がありません".into(),
+            ));
+        }
+
+        let (profile, explicit_api_key) = self
+            .resolve_profile_for_purpose("extraction", req.agent_profile_id.as_deref())
+            .await?;
+        let actual_range = input_pages
+            .first()
+            .copied()
+            .zip(input_pages.last().copied());
         let prompt_text = build_recognition_prompt(
             &doc_detail.document.title,
             &subject_category,
             &req.recognition_mode,
-            page_range,
+            actual_range,
             &extracted_texts,
-            req.cropped_region_png_base64.is_some(),
+            crop.is_some(),
         );
 
         let run_id = Uuid::new_v4().to_string();
@@ -404,7 +474,7 @@ impl AppState {
             });
         }
 
-        let items: Vec<UpsertProblemRequest> = parsed
+        let mut items: Vec<UpsertProblemRequest> = parsed
             .get("problems")
             .and_then(Value::as_array)
             .map(|arr| {
@@ -449,9 +519,24 @@ impl AppState {
             })
             .unwrap_or_default();
 
+        // A single supplied page establishes provenance even if the model omitted or
+        // misnumbered it. For multiple pages, require provenance within the input.
+        if input_pages.len() == 1 {
+            for item in &mut items {
+                item.source_pages = input_pages.iter().copied().collect();
+            }
+        } else {
+            items.retain(|item| {
+                item.source_pages
+                    .iter()
+                    .all(|page| input_pages.contains(page))
+                    && (!item.source_pages.is_empty() || page_range.is_none())
+            });
+        }
+
         let saved_problems = {
             let db = self.db.read().await;
-            ai_repo::replace_document_problems(db.pool(), &req.document_id, &items).await?
+            ai_repo::add_recognized_problems(db.pool(), &req.document_id, &items).await?
         };
         self.logger.log_info(
             "problems_recognized",
@@ -1220,6 +1305,30 @@ impl AppState {
             ));
         }
 
+        let run_id = match req.run_id.as_deref() {
+            Some(id) => Uuid::parse_str(id)
+                .ok()
+                .filter(|uuid| uuid.to_string() == id && !uuid.is_nil())
+                .ok_or_else(|| AppError::Validation("チャット実行 ID が正しくありません".into()))?
+                .to_string(),
+            None => Uuid::new_v4().to_string(),
+        };
+        {
+            let db = self.db.read().await;
+            let belongs_to_document: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1 AND document_id = ?2)",
+            )
+            .bind(&req.conversation_id)
+            .bind(&req.document_id)
+            .fetch_one(db.pool())
+            .await?;
+            if !belongs_to_document {
+                return Err(AppError::Validation(
+                    "会話が対象ドキュメントに属していません".into(),
+                ));
+            }
+        }
+
         let (profile, explicit_api_key) = self
             .resolve_profile_for_purpose("chat", req.agent_profile_id.as_deref())
             .await?;
@@ -1265,7 +1374,6 @@ impl AppState {
             });
         }
 
-        let run_id = Uuid::new_v4().to_string();
         let chosen_model = req
             .model_name
             .clone()

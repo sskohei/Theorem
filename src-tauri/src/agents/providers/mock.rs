@@ -246,28 +246,34 @@ impl AgentAdapter for MockAdapter {
                 if prompt_text.contains("[TEST_INVALID_JSON]") {
                     "not valid json".to_string()
                 } else {
-                    json!({
-                        "schema_version": 1,
-                        "problems": [
-                            {
-                                "problem_number": "第1問",
-                                "subproblem_number": "(1)",
-                                "subject_category": "mathematics",
-                                "field": "calculus",
-                                "statement_markdown": "広義積分 $I = \\int_0^{\\infty} e^{-x^2}\\,dx$ の値を求めよ。",
-                                "given_conditions": ["$x \\in [0, \\infty)$"],
-                                "target_objective": "ガウス積分 $I$ の厳密値",
-                                "source_pages": [1],
-                                "figure_refs": [],
-                                "uncertainties": if image_count == 0 {
-                                    vec!["添付画像なしのため補助テキストのみで認識しました".to_string()]
-                                } else {
-                                    Vec::<String>::new()
-                                }
-                            }
-                        ]
-                    })
-                    .to_string()
+                    let pages = if cfg!(test) && prompt_text.contains("[TEST_REPEATED_PROBLEM]") {
+                        [1, 2]
+                            .into_iter()
+                            .filter(|page| {
+                                prompt_text.contains(&format!("[TEST_PAGE_{page}]"))
+                                    || prompt_text.contains(&format!("{page}〜{page} ページ"))
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        vec![1]
+                    };
+                    let problems: Vec<_> = pages.into_iter().map(|page| json!({
+                        "problem_number": "第1問",
+                        "subproblem_number": "(1)",
+                        "subject_category": "mathematics",
+                        "field": "calculus",
+                        "statement_markdown": "広義積分 $I = \\int_0^{\\infty} e^{-x^2}\\,dx$ の値を求めよ。",
+                        "given_conditions": ["$x \\in [0, \\infty)$"],
+                        "target_objective": "ガウス積分 $I$ の厳密値",
+                        "source_pages": [page],
+                        "figure_refs": [],
+                        "uncertainties": if image_count == 0 {
+                            vec!["添付画像なしのため補助テキストのみで認識しました".to_string()]
+                        } else {
+                            Vec::<String>::new()
+                        }
+                    })).collect();
+                    json!({"schema_version": 1, "problems": problems}).to_string()
                 }
             } else if prompt_text.contains("Theorem Solution Schema v1") {
                 if prompt_text.contains("[TEST_BAD_LATEX]") {

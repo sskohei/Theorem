@@ -1,16 +1,19 @@
+import { useRef, useState } from "react";
 import { AlertTriangle, CloudUpload, FileUp, Info, X } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { CalculationsTab } from "@/features/verification/CalculationsTab";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { preparePdfRecognition } from "@/services/pdfRecognition";
+import { normalizeApiError } from "@/services/tauriClient";
 import { useAiWorkspaceStore } from "@/stores/useAiWorkspaceStore";
 import { useDocumentStore } from "@/stores/useDocumentStore";
 import { useDriveStore } from "@/stores/useDriveStore";
 import { useLayoutStore, type CenterTab } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
 import { useScienceStore } from "@/stores/useScienceStore";
-import type { PageImagePayload } from "@/types/ipc";
+import type { ApiError, RecognitionMode } from "@/types/ipc";
 import { ImageViewer } from "./ImageViewer";
 import { PdfViewer } from "./PdfViewer";
 import { RecognizedProblemsTab } from "./RecognizedProblemsTab";
@@ -40,6 +43,9 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
     error: docError,
     pageRangeStart,
     pageRangeEnd,
+    totalPages,
+    croppedPreviewUrl,
+    croppedPage,
   } = useDocumentStore();
   const {
     problems,
@@ -64,6 +70,10 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
     docDriveStatus?.jobs.find((j) => j.status === "conflict") ?? null;
   const driveConnected = driveOverview?.connection?.status === "connected";
 
+  const preparingRef = useRef(false);
+  const [preparing, setPreparing] = useState(false);
+  const [preparationError, setPreparationError] = useState<{ documentId: string; error: ApiError } | null>(null);
+
   const tabs: { id: CenterTab; label: string; count?: number; phaseBadge?: string }[] = [
     { id: "original", label: t.tabs.original },
     { id: "recognized", label: t.tabs.recognized, count: problems.length || undefined },
@@ -76,40 +86,63 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
   const primaryAttachment =
     detail?.attachments.find((a) => a.id === detail.document.primaryAttachmentId) ?? null;
 
-  const activeError = libraryError ?? docError ?? aiError;
+  const activeError = libraryError ?? docError ?? aiError
+    ?? (preparationError?.documentId === detail?.document.id ? preparationError?.error : null);
 
   const handleDismissError = () => {
     clearError();
     clearAiError();
+    setPreparationError(null);
   };
 
-  const handleRecognizeFromPdf = async (
-    pages: PageImagePayload[],
-    croppedPngBase64: string | null,
-  ) => {
-    if (!detail) return;
-    setActiveTab("recognized");
-    await recognize({
-      documentId: detail.document.id,
-      recognitionMode: croppedPngBase64 ? "page_range" : settings.defaultRecognitionMode,
-      pageRangeStart,
-      pageRangeEnd,
-      pageImages: pages,
-      croppedRegionPngBase64: croppedPngBase64,
-    });
-  };
+  const handleRecognize = async (mode: RecognitionMode, useViewerRange = false) => {
+    if (!detail || !primaryAttachment || loading || preparingRef.current || recognizing) return;
+    const documentId = detail.document.id;
+    const stillSelected = () =>
+      useDocumentStore.getState().detail === detail &&
+      useLibraryStore.getState().selectedDocumentId === documentId;
+    if (!stillSelected()) return;
 
-  const handleRecognizeFromImage = async () => {
-    if (!detail) return;
-    setActiveTab("recognized");
-    await recognize({
-      documentId: detail.document.id,
-      recognitionMode: settings.defaultRecognitionMode,
-      pageRangeStart: null,
-      pageRangeEnd: null,
-      pageImages: [],
-      croppedRegionPngBase64: null,
-    });
+    preparingRef.current = true;
+    setPreparing(true);
+    setPreparationError(null);
+    clearAiError();
+    try {
+      const isPdf = primaryAttachment.mimeType === "application/pdf";
+      const crop = isPdf && mode === "page_range" && croppedPage !== null
+        ? croppedPreviewUrl?.split(",")[1] ?? null
+        : null;
+      const range = isPdf && (mode === "page_range" || useViewerRange)
+        ? crop && croppedPage !== null
+          ? { start: croppedPage, end: croppedPage }
+          : { start: pageRangeStart, end: pageRangeEnd }
+        : null;
+      if (isPdf && !primaryBase64) throw new Error("PDF data is unavailable");
+      const pageImages = isPdf && primaryBase64 && !crop
+        ? await preparePdfRecognition(primaryBase64, range)
+        : [];
+      if (!stillSelected()) return;
+      setActiveTab("recognized");
+      await recognize({
+        documentId,
+        recognitionMode: mode,
+        pageRangeStart: range?.start ?? null,
+        pageRangeEnd: range?.end ?? null,
+        pageImages,
+        croppedRegionPngBase64: crop,
+      });
+    } catch (err) {
+      if (stillSelected()) {
+        const error = normalizeApiError(err);
+        setPreparationError({
+          documentId,
+          error: { ...error, message: t.viewer.recognitionPreparationFailed, detail: error.message },
+        });
+      }
+    } finally {
+      preparingRef.current = false;
+      setPreparing(false);
+    }
   };
 
   return (
@@ -263,15 +296,18 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
                 attachment={primaryAttachment}
                 base64Data={primaryBase64}
                 hasSavedThumbnail={detail.document.thumbnailAttachmentId !== null}
-                onRecognizePages={(pages, crop) => void handleRecognizeFromPdf(pages, crop)}
-                recognizing={recognizing}
+                onRecognize={() => void handleRecognize(
+                  croppedPreviewUrl ? "page_range" : settings.defaultRecognitionMode,
+                  pageRangeStart !== 1 || pageRangeEnd !== totalPages,
+                )}
+                recognizing={recognizing || preparing}
               />
             ) : (
               <ImageViewer
                 attachment={primaryAttachment}
                 base64Data={primaryBase64}
-                onRecognizeImage={() => void handleRecognizeFromImage()}
-                recognizing={recognizing}
+                onRecognizeImage={() => void handleRecognize(settings.defaultRecognitionMode)}
+                recognizing={recognizing || preparing}
               />
             )
           ) : (
@@ -292,7 +328,11 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
             </div>
           )
         ) : activeTab === "recognized" ? (
-          <RecognizedProblemsTab />
+          <RecognizedProblemsTab
+            key={detail?.document.id}
+            onTriggerRecognize={handleRecognize}
+            preparing={preparing}
+          />
         ) : activeTab === "solutionPdf" ? (
           <SolutionPdfTab />
         ) : activeTab === "solutionEditor" ? (

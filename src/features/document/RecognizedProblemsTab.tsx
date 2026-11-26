@@ -13,6 +13,7 @@ import { MarkdownMath } from "@/components/MarkdownMath";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/useAgentStore";
 import { useAiWorkspaceStore } from "@/stores/useAiWorkspaceStore";
@@ -52,13 +53,17 @@ const PHYSICS_FIELDS: [string, string][] = [
 ];
 
 interface RecognizedProblemsTabProps {
-  onTriggerRecognize?: (mode: RecognitionMode) => void;
+  onTriggerRecognize: (mode: RecognitionMode) => Promise<void>;
+  preparing?: boolean;
 }
 
-export function RecognizedProblemsTab({ onTriggerRecognize }: RecognizedProblemsTabProps) {
+export function RecognizedProblemsTab({ onTriggerRecognize, preparing = false }: RecognizedProblemsTabProps) {
+  const t = useI18n();
+  const [startDraft, setStartDraft] = useState<string | null>(null);
+  const [endDraft, setEndDraft] = useState<string | null>(null);
   const { setActiveTab, openSettings } = useLayoutStore();
   const { settings } = useLibraryStore();
-  const { detail, pageRangeStart, pageRangeEnd, croppedPreviewUrl, extractedPageText, currentPage } =
+  const { detail, pageRangeStart, pageRangeEnd, croppedPage, totalPages, currentPage, setPageRange, setCroppedPreviewUrl } =
     useDocumentStore();
   const { profiles, statusesByProfileId } = useAgentStore();
   const {
@@ -69,7 +74,6 @@ export function RecognizedProblemsTab({ onTriggerRecognize }: RecognizedProblems
     recognitionSchemaIssues,
     recognitionRawOutput,
     selectProblem,
-    recognize,
     upsertProblem,
     deleteProblem,
     splitProblem,
@@ -176,25 +180,6 @@ export function RecognizedProblemsTab({ onTriggerRecognize }: RecognizedProblems
     setDraft(null);
   };
 
-  const handleRunRecognize = async () => {
-    if (!docId) return;
-    if (onTriggerRecognize) {
-      onTriggerRecognize(recMode);
-      return;
-    }
-    const cropB64 = croppedPreviewUrl?.includes(",") ? croppedPreviewUrl.split(",")[1] : null;
-    await recognize({
-      documentId: docId,
-      recognitionMode: recMode,
-      pageRangeStart: recMode === "page_range" ? pageRangeStart : null,
-      pageRangeEnd: recMode === "page_range" ? pageRangeEnd : null,
-      pageImages: extractedPageText
-        ? [{ pageNumber: currentPage, pngBase64: "", extractedText: extractedPageText }]
-        : [],
-      croppedRegionPngBase64: cropB64 ?? null,
-    });
-  };
-
   const handleGenerateSolution = async () => {
     if (!docId) return;
     const res = await generateSolution({
@@ -230,7 +215,7 @@ export function RecognizedProblemsTab({ onTriggerRecognize }: RecognizedProblems
     <div className="flex h-full flex-col overflow-hidden">
       {/* Top Action Bar: Recognize & Generate Solution */}
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <select
             aria-label="問題認識モード"
             value={recMode}
@@ -243,14 +228,42 @@ export function RecognizedProblemsTab({ onTriggerRecognize }: RecognizedProblems
               ページ範囲指定 ({pageRangeStart}〜{pageRangeEnd})
             </option>
           </select>
+          {recMode === "page_range" &&
+            detail?.document.sourceType === "pdf" &&
+            (croppedPage !== null ? (
+              <Button size="xs" variant="outline" onClick={() => setCroppedPreviewUrl(null)}>
+                {croppedPage}{t.viewer.clearRecognitionCrop}
+              </Button>
+            ) : (
+              <>
+                <Input
+                  type="number" min={1} max={totalPages} value={startDraft ?? pageRangeStart}
+                  aria-label={t.viewer.recognitionStartPage} className="w-16"
+                  onChange={(e) => setStartDraft(e.target.value)}
+                  onBlur={() => {
+                    if (startDraft) setPageRange(Number(startDraft), pageRangeEnd);
+                    setStartDraft(null);
+                  }}
+                />
+                <Input
+                  type="number" min={pageRangeStart} max={totalPages} value={endDraft ?? pageRangeEnd}
+                  aria-label={t.viewer.recognitionEndPage} className="w-16"
+                  onChange={(e) => setEndDraft(e.target.value)}
+                  onBlur={() => {
+                    if (endDraft) setPageRange(pageRangeStart, Number(endDraft));
+                    setEndDraft(null);
+                  }}
+                />
+              </>
+            ))}
           <Button
             size="xs"
             variant="primary"
-            disabled={recognizing || imageUnsupported}
-            onClick={() => void handleRunRecognize()}
+            disabled={preparing || recognizing || imageUnsupported}
+            onClick={() => void onTriggerRecognize(recMode)}
           >
             <Sparkles className="h-3.5 w-3.5" />
-            <span>{recognizing ? "問題認識中..." : "AI で問題認識"}</span>
+            <span>{recognizing || preparing ? "問題認識中..." : "AI で問題認識"}</span>
           </Button>
           <Button
             size="xs"

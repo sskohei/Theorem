@@ -188,12 +188,12 @@ Theorem/ (FormulaDesk)
 
 ## 6. ローカルデータストレージ構成
 
-アプリの保存領域は Tauri の `app_data_dir` 等を利用して OS ごとに決定する（例: Windows では `%APPDATA%\FormulaDesk` 相当）。DB には絶対パスを保持せず、このルートからの相対パスを保存する。
+アプリの保存領域は Tauri の `app_data_dir` 等を利用して OS ごとに決定する（例: Windows では `%APPDATA%\dev.theorem.desktop` 相当）。DB には絶対パスを保持せず、このルートからの相対パスを保存する。
 
 ```text
-FormulaDesk/
+dev.theorem.desktop/
 ├── database/
-│   └── formuladesk.db          # SQLite (WAL モード, FK 有効)
+│   └── theorem.db          # SQLite (WAL モード, FK 有効)
 ├── attachments/
 │   ├── originals/              # 取り込み済み問題 PDF / 画像（原本不変）
 │   ├── solutions/              # 生成済み解答 PDF
@@ -212,7 +212,8 @@ FormulaDesk/
 
 - **UUID + SHA-256**: すべての添付ファイルに UUID と SHA-256 ハッシュを付与し、重複インポートを検出する。
 - **アトミック書き込み**: 同一ボリューム内の一時ファイルへ書き込み・`sync_all` 後にリネームし、途中終了によるファイル破損を防ぐ。
-- **バックアップと復元**: `formuladesk.db`（SQLite オンラインバックアップ API または `VACUUM INTO`）と `attachments/`・`sources/`・`settings.json` をまとめてバックアップ・復元可能にする。認証情報（OS キーチェーン内）はバックアップに含めない。
+- **バックアップと復元**: `theorem.db`（SQLite オンラインバックアップ API または `VACUUM INTO`）と `attachments/`・`sources/`・`settings.json` をまとめてバックアップ・復元可能にする。認証情報（OS キーチェーン内）はバックアップに含めない。
+- **旧ライブラリの引き継ぎ**: 旧 `dev.formuladesk.app` の `database/formuladesk.db` と旧 ZIP の取り扱いは [ADR-0007](./adr/0007-phase2-persistence-and-request-identity.md) に従う。
 
 ---
 

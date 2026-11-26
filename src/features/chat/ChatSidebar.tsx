@@ -41,6 +41,7 @@ export function ChatSidebar() {
     includeProblemContext,
     includeSolutionContext,
     sending,
+    sendingHere,
     streamingText,
     liveToolCalls,
     pendingPermissions,
@@ -314,7 +315,7 @@ export function ChatSidebar() {
           <div className="py-10 text-center text-xs text-slate-500">
             左サイドバーから問題を選択すると、その問題に紐づく AI チャットを開始できます。
           </div>
-        ) : messages.length === 0 && !sending ? (
+        ) : messages.length === 0 && !sendingHere ? (
           <div className="py-10 text-center text-xs text-slate-500 dark:text-slate-400">
             <p className="font-medium text-slate-700 dark:text-slate-300">
               問題や解答について質問できます
@@ -447,7 +448,7 @@ export function ChatSidebar() {
         )}
 
         {/* Active Streaming Message Bubble */}
-        {sending && (
+        {sendingHere && (
           <div className="mr-2 rounded-lg border border-blue-300 bg-white p-2.5 text-xs dark:border-blue-800 dark:bg-slate-900">
             <div className="mb-1 flex items-center justify-between text-[10px] text-blue-600 dark:text-blue-400">
               <span className="font-semibold">AI（ストリーミング応答中...）</span>
@@ -559,7 +560,7 @@ export function ChatSidebar() {
             </Button>
           </div>
 
-          {sending ? (
+          {sendingHere ? (
             <Button size="xs" variant="danger" onClick={() => void cancelActiveRun()}>
               <Square className="h-3 w-3" />
               <span>中断</span>
@@ -568,7 +569,7 @@ export function ChatSidebar() {
             <Button
               size="xs"
               variant="primary"
-              disabled={!selectedDocumentId || (!inputText.trim() && attachedImages.length === 0)}
+              disabled={!selectedDocumentId || sending || (!inputText.trim() && attachedImages.length === 0)}
               onClick={() => void handleSend()}
             >
               <Send className="h-3.5 w-3.5" />

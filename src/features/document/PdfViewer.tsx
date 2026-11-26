@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 import {
   Camera,
   ChevronLeft,
@@ -16,19 +15,18 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useI18n } from "@/lib/i18n";
-import { base64ToUint8Array, cn } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { loadPdf } from "@/services/pdfRecognition";
 import { tauriClient } from "@/services/tauriClient";
 import { useDocumentStore } from "@/stores/useDocumentStore";
-import type { AttachmentInfo, PageImagePayload } from "@/types/ipc";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+import type { AttachmentInfo } from "@/types/ipc";
 
 interface PdfViewerProps {
   documentId: string;
   attachment: AttachmentInfo;
   base64Data: string;
   hasSavedThumbnail: boolean;
-  onRecognizePages?: (pages: PageImagePayload[], croppedPngBase64: string | null) => void;
+  onRecognize?: () => void;
   recognizing?: boolean;
 }
 
@@ -44,7 +42,7 @@ export function PdfViewer({
   attachment,
   base64Data,
   hasSavedThumbnail,
-  onRecognizePages,
+  onRecognize,
   recognizing = false,
 }: PdfViewerProps) {
   const t = useI18n();
@@ -78,11 +76,12 @@ export function PdfViewer({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textLayerRef = useRef<HTMLDivElement | null>(null);
   const thumbSavedRef = useRef(false);
+  const renderedPageRef = useRef<number | null>(null);
 
   // 1. Load PDF document from Rust base64 payload
   useEffect(() => {
     let cancelled = false;
-    let loadedDoc: pdfjsLib.PDFDocumentProxy | null = null;
+    let task: ReturnType<typeof loadPdf> | undefined;
     thumbSavedRef.current = hasSavedThumbnail;
     setRenderError(null);
     setThumbnails({});
@@ -90,17 +89,11 @@ export function PdfViewer({
 
     const load = async () => {
       try {
-        const bytes = base64ToUint8Array(base64Data);
-        const task = pdfjsLib.getDocument({ data: bytes });
+        task = loadPdf(base64Data);
         const doc = await task.promise;
-        if (cancelled) {
-          await doc.destroy();
-          return;
-        }
-        loadedDoc = doc;
+        if (cancelled) return;
         setPdfDoc(doc);
         setTotalPages(doc.numPages);
-        setPageRange(1, doc.numPages);
       } catch (err) {
         if (!cancelled) {
           setRenderError(err instanceof Error ? err.message : String(err));
@@ -111,11 +104,9 @@ export function PdfViewer({
 
     return () => {
       cancelled = true;
-      if (loadedDoc) {
-        void loadedDoc.destroy();
-      }
+      void task?.destroy();
     };
-  }, [base64Data, hasSavedThumbnail, setPageRange, setTotalPages]);
+  }, [base64Data, hasSavedThumbnail, setTotalPages]);
 
   // 2. Render active page + selectable text layer + text extraction
   useEffect(() => {
@@ -139,6 +130,8 @@ export function PdfViewer({
         activeRenderTask = page.render({ canvasContext: ctx, viewport, canvas });
         await activeRenderTask.promise;
         if (cancelled) return;
+
+        renderedPageRef.current = currentPage;
 
         // Text extraction & selectable overlay
         const textContent = await page.getTextContent();
@@ -176,6 +169,7 @@ export function PdfViewer({
 
     return () => {
       cancelled = true;
+      renderedPageRef.current = null;
       activeRenderTask?.cancel();
     };
   }, [pdfDoc, currentPage, zoom, setExtractedPageText]);
@@ -233,50 +227,8 @@ export function PdfViewer({
 
   const handleRenderPagePng = () => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    setCroppedPreviewUrl(canvas.toDataURL("image/png"));
-  };
-
-  const handleTriggerRecognize = async () => {
-    if (!onRecognizePages) return;
-    const cropB64 = croppedPreviewUrl?.includes(",")
-      ? (croppedPreviewUrl.split(",")[1] ?? null)
-      : null;
-    if (cropB64) {
-      onRecognizePages([], cropB64);
-      return;
-    }
-    if (!pdfDoc) {
-      onRecognizePages([], null);
-      return;
-    }
-    const start = Math.max(1, pageRangeStart);
-    const end = Math.min(pdfDoc.numPages, Math.max(start, pageRangeEnd), start + 4);
-    const payloads: PageImagePayload[] = [];
-    for (let p = start; p <= end; p++) {
-      try {
-        const page = await pdfDoc.getPage(p);
-        const vp = page.getViewport({ scale: 1.5 });
-        const off = document.createElement("canvas");
-        off.width = Math.max(1, Math.floor(vp.width));
-        off.height = Math.max(1, Math.floor(vp.height));
-        const ctx = off.getContext("2d");
-        let pngBase64 = "";
-        if (ctx) {
-          await page.render({ canvasContext: ctx, viewport: vp, canvas: off }).promise;
-          pngBase64 = off.toDataURL("image/png").split(",")[1] ?? "";
-        }
-        const tc = await page.getTextContent();
-        const text = tc.items
-          .map((item) => ("str" in item ? item.str : ""))
-          .filter(Boolean)
-          .join(" ");
-        payloads.push({ pageNumber: p, pngBase64, extractedText: text || null });
-      } catch {
-        // Continue remaining pages
-      }
-    }
-    onRecognizePages(payloads, null);
+    if (!canvas || renderedPageRef.current !== currentPage) return;
+    setCroppedPreviewUrl(canvas.toDataURL("image/png"), currentPage);
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -299,7 +251,7 @@ export function PdfViewer({
   };
 
   const handleCanvasMouseUp = () => {
-    if (!cropMode || !draggingCrop || !cropRect || !canvasRef.current) {
+    if (!cropMode || !draggingCrop || !cropRect || !canvasRef.current || renderedPageRef.current !== currentPage) {
       setDraggingCrop(false);
       return;
     }
@@ -316,7 +268,7 @@ export function PdfViewer({
     const ctx = out.getContext("2d");
     if (ctx) {
       ctx.drawImage(canvasRef.current, sx, sy, sw, sh, 0, 0, sw, sh);
-      setCroppedPreviewUrl(out.toDataURL("image/png"));
+      setCroppedPreviewUrl(out.toDataURL("image/png"), currentPage);
     }
   };
 
@@ -414,12 +366,12 @@ export function PdfViewer({
           <span>{t.viewer.preprocess}</span>
         </Button>
 
-        {onRecognizePages && (
+        {onRecognize && (
           <Button
             variant="primary"
             size="xs"
             disabled={recognizing}
-            onClick={() => void handleTriggerRecognize()}
+            onClick={onRecognize}
           >
             <Sparkles className="h-3.5 w-3.5" />
             <span>{recognizing ? "認識中..." : "問題認識"}</span>

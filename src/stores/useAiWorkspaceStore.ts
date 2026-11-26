@@ -164,6 +164,10 @@ export const useAiWorkspaceStore = create<AiWorkspaceState>((set, get) => ({
     });
     try {
       const res = await tauriClient.recognizeProblems(req);
+      if (get().activeDocumentId !== req.documentId) {
+        set({ recognizing: false });
+        return res.schemaIssues.length === 0;
+      }
       set({
         recognizing: false,
         problems: res.problems,
@@ -173,7 +177,9 @@ export const useAiWorkspaceStore = create<AiWorkspaceState>((set, get) => ({
       });
       return res.schemaIssues.length === 0;
     } catch (err) {
-      set({ recognizing: false, error: normalizeApiError(err) });
+      set(get().activeDocumentId === req.documentId
+        ? { recognizing: false, error: normalizeApiError(err) }
+        : { recognizing: false });
       return false;
     }
   },
