@@ -1,3 +1,5 @@
+pub mod keyring;
+
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -169,7 +171,7 @@ pub struct DiagnosticLogger {
 impl DiagnosticLogger {
     pub fn new(logs_dir: &Path) -> Self {
         Self {
-            log_file: logs_dir.join("formuladesk.log.jsonl"),
+            log_file: logs_dir.join("theorem.log.jsonl"),
         }
     }
 
@@ -238,8 +240,7 @@ mod tests {
         let dir = TempDir::new().expect("tempdir");
         let logger = DiagnosticLogger::new(dir.path());
         logger.log_error("auth_error", "failed with key sk-secret-value-999");
-        let content =
-            fs::read_to_string(dir.path().join("formuladesk.log.jsonl")).expect("read log");
+        let content = fs::read_to_string(dir.path().join("theorem.log.jsonl")).expect("read log");
         assert!(!content.contains("secret-value-999"));
         assert!(content.contains("[REDACTED]"));
     }

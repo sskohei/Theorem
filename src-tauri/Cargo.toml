@@ -1,23 +1,28 @@
 [package]
-name = "formuladesk"
+name = "theorem"
 version = "0.1.0"
 description = "Open-source, local-first AI workspace for mathematics and physics"
-authors = ["FormulaDesk Contributors"]
+authors = ["Theorem Contributors"]
 license = "MIT"
 edition = "2024"
 
 [lib]
-name = "formuladesk_lib"
+name = "theorem_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+async-trait = "0.1"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
+futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+jsonschema = "0.29"
+keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service"] }
 lopdf = "0.36"
+mitex = "0.2.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -26,8 +31,15 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
+typst = "0.15.1"
+typst-assets = { version = "0.15.1", features = ["fonts"] }
+typst-layout = "0.15.1"
+typst-pdf = "0.15.1"
 uuid = { version = "1", features = ["v4"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tempfile = "3"

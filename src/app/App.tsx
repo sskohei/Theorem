@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   CloudOff,
@@ -12,16 +13,20 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { ChatSidebarPlaceholder } from "@/features/chat/ChatSidebarPlaceholder";
+import { ChatSidebar } from "@/features/chat/ChatSidebar";
 import { CenterWorkspace } from "@/features/document/CenterWorkspace";
 import { LibrarySidebar } from "@/features/library/LibrarySidebar";
 import { SettingsModal } from "@/features/settings/SettingsModal";
 import { useI18n } from "@/lib/i18n";
 import { uint8ArrayToBase64 } from "@/lib/utils";
 import { isTauriRuntime, tauriClient } from "@/services/tauriClient";
+import { useAgentStore } from "@/stores/useAgentStore";
+import { useAiWorkspaceStore } from "@/stores/useAiWorkspaceStore";
+import { useChatStore } from "@/stores/useChatStore";
 import { useDocumentStore } from "@/stores/useDocumentStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
+import type { AgentEventEnvelope } from "@/types/ipc";
 
 export function App() {
   const t = useI18n();
@@ -48,19 +53,41 @@ export function App() {
   } = useLibraryStore();
 
   const { loadDocument, currentPage, setCurrentPage } = useDocumentStore();
+  const { loadProfiles } = useAgentStore();
+  const { loadForDocument: loadAiForDocument } = useAiWorkspaceStore();
+  const { loadForDocument: loadChatForDocument, handleAgentEvent } = useChatStore();
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [draggingOverlay, setDraggingOverlay] = useState(false);
 
-  // 1. Initial bootstrap from Rust SQLite core
+  // 1. Initial bootstrap from Rust SQLite core + AI agent profiles
   useEffect(() => {
     void bootstrap();
-  }, [bootstrap]);
+    void loadProfiles();
+  }, [bootstrap, loadProfiles]);
 
-  // 2. Load selected document detail & binary payload from Rust
+  // 2. Load selected document detail, problems, solutions & conversations
   useEffect(() => {
     void loadDocument(selectedDocumentId);
-  }, [selectedDocumentId, loadDocument]);
+    void loadAiForDocument(selectedDocumentId);
+    void loadChatForDocument(selectedDocumentId);
+  }, [selectedDocumentId, loadDocument, loadAiForDocument, loadChatForDocument]);
+
+  // 2b. Subscribe to live Rust AgentManager streaming events (`agent://event`)
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unlisten: (() => void) | null = null;
+    void listen<AgentEventEnvelope>("agent://event", (event) => {
+      handleAgentEvent(event.payload);
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [handleAgentEvent]);
 
   // 3. Synchronize light/dark/system theme class on <html>
   useEffect(() => {
@@ -271,7 +298,7 @@ export function App() {
             {t.appName}
           </span>
           <Badge variant="info" className="hidden sm:inline-flex">
-            Phase 1
+            Phase 2
           </Badge>
         </div>
 
@@ -350,7 +377,7 @@ export function App() {
               className="w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-blue-400/60"
             />
             <div style={{ width: `${rightSidebarWidth}px` }} className="h-full shrink-0">
-              <ChatSidebarPlaceholder />
+              <ChatSidebar />
             </div>
           </>
         )}

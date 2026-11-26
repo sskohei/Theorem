@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Download, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
+import { Download, RotateCw, Sparkles, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useI18n } from "@/lib/i18n";
 import { formatBytes } from "@/lib/utils";
@@ -10,9 +10,16 @@ import type { AttachmentInfo } from "@/types/ipc";
 interface ImageViewerProps {
   attachment: AttachmentInfo;
   base64Data: string;
+  onRecognizeImage?: () => void;
+  recognizing?: boolean;
 }
 
-export function ImageViewer({ attachment, base64Data }: ImageViewerProps) {
+export function ImageViewer({
+  attachment,
+  base64Data,
+  onRecognizeImage,
+  recognizing = false,
+}: ImageViewerProps) {
   const t = useI18n();
   const { zoom, rotation, setZoom, rotateClockwise } = useDocumentStore();
   const [exportError, setExportError] = useState<string | null>(null);
@@ -54,6 +61,18 @@ export function ImageViewer({ attachment, base64Data }: ImageViewerProps) {
           {" · "}
           {formatBytes(attachment.byteSize)}
         </span>
+
+        {onRecognizeImage && (
+          <Button
+            variant="primary"
+            size="xs"
+            disabled={recognizing}
+            onClick={onRecognizeImage}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>{recognizing ? "認識中..." : "問題認識"}</span>
+          </Button>
+        )}
 
         <Button
           variant="outline"

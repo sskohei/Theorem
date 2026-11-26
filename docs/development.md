@@ -1,6 +1,6 @@
 # 開発者向けガイド（Development）
 
-> **ステータス**: Active v1.1（Phase 1 アプリ基盤構築済み）
+> **ステータス**: Active v1.2（Phase 2 AI 機能統合・アプリ名 `Theorem` 改称反映済み）
 > **最優先開発 OS**: Windows 11（macOS / Linux は将来対応）
 > **最終更新**: 2026-11-26
 
@@ -67,6 +67,9 @@ Set-Location src-tauri
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test
+
+# 任意: 実機インストール済み OpenAI Codex を使った Phase 2 ライブ E2E 検証
+cargo test --lib -- --ignored test_live_codex_full_phase2_workflow --nocapture
 ```
 
 ### 2.3 Science MCP Server（Phase 3〜）

@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://theorem.dev/schemas/solution.v1.schema.json",
+  "title": "Theorem Structured Solution Schema v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "subject",
+    "title",
+    "mode",
+    "steps",
+    "answer"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "problem_id": {
+      "type": ["string", "null"]
+    },
+    "subject": {
+      "type": "string",
+      "enum": ["mathematics", "physics", "other"]
+    },
+    "field": {
+      "type": ["string", "null"]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["standard", "concise", "detailed", "rigorous", "beginner", "hint", "verified", "review"]
+    },
+    "assumptions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "coordinate_system": {
+      "type": ["string", "null"]
+    },
+    "given_quantities": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["symbol", "description"],
+        "additionalProperties": false,
+        "properties": {
+          "symbol": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "unit": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "principles": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "definitions": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["name", "explanation"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "latex": { "type": ["string", "null"] },
+          "explanation": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "theorems": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["name", "application"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "conditions": { "type": ["string", "null"] },
+          "application": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "domain_and_boundary": {
+      "type": ["string", "null"]
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["explanation", "equation", "derivation", "case_split", "note"]
+          },
+          "heading": { "type": ["string", "null"] },
+          "text": { "type": ["string", "null"] },
+          "latex": { "type": ["string", "null"] },
+          "display": { "type": "boolean", "default": true }
+        }
+      }
+    },
+    "proof": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["kind", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["assumption", "claim", "derivation", "case", "conclusion", "qed"]
+          },
+          "text": { "type": "string", "minLength": 1 },
+          "latex": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "answer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": ["string", "null"] },
+        "latex": { "type": ["string", "null"] },
+        "unit": { "type": ["string", "null"] }
+      }
+    },
+    "dimensional_check": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "note": { "type": "string" },
+        "latex": { "type": ["string", "null"] }
+      }
+    },
+    "limiting_cases": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "alternative_solutions": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["title", "summary"],
+        "additionalProperties": false,
+        "properties": {
+          "title": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 },
+          "latex": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "counterexamples": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "verification": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["source_kind", "target", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "source_kind": {
+            "type": "string",
+            "enum": ["science_mcp", "ai_self_check", "user_check"]
+          },
+          "target": { "type": "string", "minLength": 1 },
+          "method": { "type": ["string", "null"] },
+          "status": {
+            "type": "string",
+            "enum": ["passed", "failed", "inconclusive", "not_run", "error"]
+          },
+          "note": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["relative_path"],
+        "additionalProperties": false,
+        "properties": {
+          "relative_path": { "type": "string", "minLength": 1 },
+          "caption": { "type": ["string", "null"] },
+          "artifact_type": {
+            "type": "string",
+            "enum": ["plot", "diagram", "crop", "table"],
+            "default": "diagram"
+          }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    }
+  }
+}

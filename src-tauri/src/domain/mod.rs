@@ -136,6 +136,66 @@ pub struct ImportBatchResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct PdfSettings {
+    #[serde(default = "default_pdf_template")]
+    pub default_template: String,
+    #[serde(default = "default_paper_size")]
+    pub paper_size: String,
+    #[serde(default = "default_true")]
+    pub show_model_name: bool,
+    #[serde(default = "default_true")]
+    pub show_generated_at: bool,
+    #[serde(default = "default_true")]
+    pub show_version_number: bool,
+}
+
+fn default_pdf_template() -> String {
+    "auto".to_string()
+}
+
+fn default_paper_size() -> String {
+    "a4".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for PdfSettings {
+    fn default() -> Self {
+        Self {
+            default_template: default_pdf_template(),
+            paper_size: default_paper_size(),
+            show_model_name: true,
+            show_generated_at: true,
+            show_version_number: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPurposeAssignments {
+    pub extraction_profile_id: Option<String>,
+    pub solution_profile_id: Option<String>,
+    pub chat_profile_id: Option<String>,
+    pub verification_profile_id: Option<String>,
+    pub revision_profile_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptSettings {
+    #[serde(default)]
+    pub mathematics_custom_instructions: String,
+    #[serde(default)]
+    pub physics_custom_instructions: String,
+    #[serde(default)]
+    pub mode_custom_instructions: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub language: String,
     pub theme: String,
@@ -143,6 +203,14 @@ pub struct AppSettings {
     pub default_recognition_mode: String,
     pub left_sidebar_width: u32,
     pub right_sidebar_width: u32,
+    #[serde(default)]
+    pub cloud_ai_consent_accepted: bool,
+    #[serde(default)]
+    pub pdf: PdfSettings,
+    #[serde(default)]
+    pub agent_assignments: AgentPurposeAssignments,
+    #[serde(default)]
+    pub prompts: PromptSettings,
 }
 
 impl Default for AppSettings {
@@ -154,6 +222,10 @@ impl Default for AppSettings {
             default_recognition_mode: "printed_only".to_string(),
             left_sidebar_width: 280,
             right_sidebar_width: 340,
+            cloud_ai_consent_accepted: false,
+            pdf: PdfSettings::default(),
+            agent_assignments: AgentPurposeAssignments::default(),
+            prompts: PromptSettings::default(),
         }
     }
 }
@@ -199,4 +271,377 @@ pub struct BootstrapState {
 pub struct AttachmentBinaryResponse {
     pub attachment: AttachmentInfo,
     pub base64_data: String,
+}
+
+// ============================================================================
+// Phase 2: Problems, Solutions, PDF Compilation, Chat, and AI Agents
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Problem {
+    pub id: String,
+    pub document_id: String,
+    pub problem_number: String,
+    pub subproblem_number: Option<String>,
+    pub sort_order: i64,
+    pub subject_category: String,
+    pub field: Option<String>,
+    pub statement_markdown: String,
+    pub given_conditions: Vec<String>,
+    pub target_objective: Option<String>,
+    pub source_pages: Vec<i64>,
+    pub figure_refs: Vec<String>,
+    pub uncertainties: Vec<String>,
+    pub is_user_verified: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertProblemRequest {
+    pub id: Option<String>,
+    pub document_id: String,
+    pub problem_number: String,
+    pub subproblem_number: Option<String>,
+    pub subject_category: String,
+    pub field: Option<String>,
+    pub statement_markdown: String,
+    #[serde(default)]
+    pub given_conditions: Vec<String>,
+    pub target_objective: Option<String>,
+    #[serde(default)]
+    pub source_pages: Vec<i64>,
+    #[serde(default)]
+    pub figure_refs: Vec<String>,
+    #[serde(default)]
+    pub uncertainties: Vec<String>,
+    #[serde(default)]
+    pub is_user_verified: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Solution {
+    pub id: String,
+    pub document_id: String,
+    pub problem_id: Option<String>,
+    pub version_number: i64,
+    pub parent_solution_id: Option<String>,
+    pub is_current: bool,
+    pub mode: String,
+    pub schema_version: i64,
+    pub structured_json: String,
+    pub validation_status: String,
+    pub typst_source_attachment_id: Option<String>,
+    pub pdf_attachment_id: Option<String>,
+    pub agent_run_id: Option<String>,
+    pub model_name: Option<String>,
+    pub change_summary: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaValidationIssue {
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LatexConversionError {
+    pub location: String,
+    pub step_index: Option<usize>,
+    pub latex: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SolutionOperationResult {
+    pub solution: Solution,
+    pub schema_issues: Vec<SchemaValidationIssue>,
+    pub latex_errors: Vec<LatexConversionError>,
+    pub pdf_error: Option<String>,
+    pub raw_output: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageImagePayload {
+    pub page_number: i64,
+    pub png_base64: String,
+    pub extracted_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecognizeProblemsRequest {
+    pub document_id: String,
+    pub agent_profile_id: Option<String>,
+    pub model_name: Option<String>,
+    pub recognition_mode: String,
+    pub page_range_start: Option<i64>,
+    pub page_range_end: Option<i64>,
+    #[serde(default)]
+    pub page_images: Vec<PageImagePayload>,
+    pub cropped_region_png_base64: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecognizeProblemsResult {
+    pub problems: Vec<Problem>,
+    pub schema_issues: Vec<SchemaValidationIssue>,
+    pub raw_output: Option<String>,
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateSolutionRequest {
+    pub document_id: String,
+    pub problem_id: Option<String>,
+    pub agent_profile_id: Option<String>,
+    pub model_name: Option<String>,
+    pub mode: String,
+    pub target_scope: String,
+    pub page_range_start: Option<i64>,
+    pub page_range_end: Option<i64>,
+    pub repair_feedback: Option<String>,
+    pub parent_solution_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveSolutionEditRequest {
+    pub document_id: String,
+    pub problem_id: Option<String>,
+    pub parent_solution_id: Option<String>,
+    pub mode: String,
+    pub structured_json: String,
+    pub change_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Conversation {
+    pub id: String,
+    pub document_id: String,
+    pub problem_id: Option<String>,
+    pub solution_id: Option<String>,
+    pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMessage {
+    pub id: String,
+    pub conversation_id: String,
+    pub role: String,
+    pub content_markdown: String,
+    pub status: String,
+    pub agent_run_id: Option<String>,
+    pub referenced_problem_id: Option<String>,
+    pub attachment_ids: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendChatMessageRequest {
+    pub conversation_id: String,
+    pub document_id: String,
+    pub agent_profile_id: Option<String>,
+    pub model_name: Option<String>,
+    pub content_markdown: String,
+    pub referenced_problem_id: Option<String>,
+    #[serde(default)]
+    pub include_problem_context: bool,
+    #[serde(default)]
+    pub include_solution_context: bool,
+    #[serde(default)]
+    pub attached_images: Vec<ChatImageUpload>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatImageUpload {
+    pub filename: String,
+    pub mime_type: String,
+    pub base64_data: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendChatMessageResult {
+    pub run_id: String,
+    pub user_message: ChatMessage,
+    pub assistant_message: ChatMessage,
+    pub resumed_external_session: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCapabilities {
+    pub supports_image_input: bool,
+    pub supports_pdf_input: bool,
+    pub supports_streaming: bool,
+    pub supports_session_resume: bool,
+    pub supports_model_listing: bool,
+    pub supports_auth_status_check: bool,
+    pub supports_mcp_scoped_config: bool,
+    pub supports_permission_hooks: bool,
+    pub supports_sandbox_restriction: bool,
+    pub supports_cancel: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentModelInfo {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStatus {
+    pub provider_kind: String,
+    pub installed: bool,
+    pub resolved_path: Option<String>,
+    pub version: Option<String>,
+    /// `"authenticated"` | `"unauthenticated"` | `"unknown"` | `"terms_restricted"`
+    pub auth_status: String,
+    pub auth_method: Option<String>,
+    /// `"verified_live"` | `"verified_mock"` | `"unverified"`
+    pub verification_status: String,
+    pub available_models: Option<Vec<AgentModelInfo>>,
+    pub capabilities: AgentCapabilities,
+    pub auth_guide: String,
+    pub compliance_note: String,
+    pub detail_note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProfile {
+    pub id: String,
+    pub name: String,
+    pub provider_kind: String,
+    pub executable_path: Option<String>,
+    pub args: Vec<String>,
+    pub default_model: Option<String>,
+    pub auth_mode: String,
+    pub has_keyring_secret: bool,
+    pub is_enabled: bool,
+    pub is_default: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAgentProfileRequest {
+    pub id: Option<String>,
+    pub name: String,
+    pub provider_kind: String,
+    pub executable_path: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    pub default_model: Option<String>,
+    pub auth_mode: String,
+    #[serde(default = "default_true")]
+    pub is_enabled: bool,
+    #[serde(default)]
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentEventEnvelope {
+    pub event_id: String,
+    pub run_id: String,
+    pub session_id: String,
+    pub message_id: Option<String>,
+    pub timestamp: String,
+    pub event: AgentEventPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum AgentEventPayload {
+    SessionStarted {
+        #[serde(rename = "externalSessionId")]
+        external_session_id: Option<String>,
+        resumed: bool,
+    },
+    MessageStarted {
+        role: String,
+    },
+    TextDelta {
+        text: String,
+    },
+    ToolCallStarted {
+        #[serde(rename = "callId")]
+        call_id: String,
+        server: Option<String>,
+        #[serde(rename = "toolName")]
+        tool_name: String,
+        arguments: serde_json::Value,
+    },
+    ToolCallUpdated {
+        #[serde(rename = "callId")]
+        call_id: String,
+        status: String,
+        progress: Option<String>,
+    },
+    ToolCallCompleted {
+        #[serde(rename = "callId")]
+        call_id: String,
+        succeeded: bool,
+        output: serde_json::Value,
+    },
+    PermissionRequested {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        action: String,
+        target: Option<String>,
+        detail: String,
+    },
+    ArtifactCreated {
+        #[serde(rename = "relativePath")]
+        relative_path: String,
+        #[serde(rename = "mimeType")]
+        mime_type: String,
+        caption: Option<String>,
+    },
+    UsageUpdated {
+        #[serde(rename = "inputTokens")]
+        input_tokens: Option<u64>,
+        #[serde(rename = "outputTokens")]
+        output_tokens: Option<u64>,
+        #[serde(rename = "rawLabel")]
+        raw_label: Option<String>,
+    },
+    MessageCompleted {
+        #[serde(rename = "finalText")]
+        final_text: Option<String>,
+    },
+    Cancelled {
+        reason: Option<String>,
+    },
+    Failed {
+        code: String,
+        message: String,
+        #[serde(rename = "rateLimited")]
+        rate_limited: bool,
+        #[serde(rename = "authRequired")]
+        auth_required: bool,
+    },
 }

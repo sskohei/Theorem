@@ -28,6 +28,21 @@ pub enum AppError {
 
     #[error("バックアップ操作に失敗しました: {0}")]
     Backup(String),
+
+    #[error("AI エージェント処理に失敗しました: {0}")]
+    Agent(String),
+
+    #[error("出力データのスキーマ検証に失敗しました: {0}")]
+    SchemaValidation(String),
+
+    #[error("LaTeX → Typst 数式変換に失敗しました: {0}")]
+    LatexConversion(String),
+
+    #[error("PDF 生成に失敗しました: {0}")]
+    PdfGeneration(String),
+
+    #[error("OS キーチェーン操作に失敗しました: {0}")]
+    Keyring(String),
 }
 
 impl From<sqlx::Error> for AppError {
@@ -93,6 +108,36 @@ impl From<AppError> for ApiError {
             AppError::Backup(msg) => (
                 "BACKUP_ERROR",
                 "バックアップまたは復元処理に失敗しました".to_string(),
+                Some(redact_secrets(&msg)),
+                true,
+            ),
+            AppError::Agent(msg) => (
+                "AGENT_ERROR",
+                "AI エージェントとの通信または実行に失敗しました".to_string(),
+                Some(redact_secrets(&msg)),
+                true,
+            ),
+            AppError::SchemaValidation(msg) => (
+                "SCHEMA_VALIDATION_ERROR",
+                "AI 応答の構造化データ検証に失敗しました".to_string(),
+                Some(redact_secrets(&msg)),
+                true,
+            ),
+            AppError::LatexConversion(msg) => (
+                "LATEX_CONVERSION_ERROR",
+                "LaTeX 数式から Typst への変換に失敗しました".to_string(),
+                Some(redact_secrets(&msg)),
+                true,
+            ),
+            AppError::PdfGeneration(msg) => (
+                "PDF_GENERATION_ERROR",
+                "Typst による解答 PDF 生成に失敗しました".to_string(),
+                Some(redact_secrets(&msg)),
+                true,
+            ),
+            AppError::Keyring(msg) => (
+                "KEYRING_ERROR",
+                "OS キーチェーンへの認証情報アクセスに失敗しました".to_string(),
                 Some(redact_secrets(&msg)),
                 true,
             ),

@@ -1,3 +1,4 @@
+pub mod ai_repo;
 pub mod library_repo;
 
 use std::path::Path;
@@ -38,6 +39,8 @@ impl Database {
 
         let db = Self { pool };
         db.seed_default_subjects_if_empty().await?;
+        ai_repo::seed_default_agent_profiles_if_empty(&db.pool).await?;
+        ai_repo::recover_interrupted_state(&db.pool).await?;
         Ok(db)
     }
 
@@ -46,6 +49,9 @@ impl Database {
     }
 
     pub async fn close(&self) {
+        let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE);")
+            .execute(&self.pool)
+            .await;
         self.pool.close().await;
     }
 

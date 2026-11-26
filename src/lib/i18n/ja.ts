@@ -1,5 +1,5 @@
 export const ja = {
-  appName: "FormulaDesk",
+  appName: "Theorem",
   appSubtitle: "大学数学・物理 AI 学習ワークスペース",
   header: {
     searchPlaceholder: "問題名・ファイル名・タグで検索 (Ctrl+K)",
@@ -146,14 +146,14 @@ export const ja = {
         "React（WebView）から SQLite・OS ファイルシステムへの直接アクセスを禁止し、Rust 検証済み IPC コマンドのみを公開",
         "Tauri v2 最小権限 Capability（main ウィンドウ限定・dialog のみ許可）と厳格 CSP（外部スクリプト・unsafe-eval 禁止）",
         "原本ファイル不変・一時ファイル経由のアトミック書き込み・相対パス管理・パストラバーサルおよびシンボリックリンク脱出拒否",
-        "診断ログ（logs/formuladesk.log.jsonl）における認証情報・長文ペイロードの自動マスキング",
+        "診断ログ（logs/theorem.log.jsonl）における認証情報・長文ペイロードの自動マスキング",
       ],
     },
     about: {
       version: "バージョン",
       license: "ライセンス",
       status: "開発フェーズ",
-      statusValue: "Phase 1：アプリ基盤（MVP 開発中）",
+      statusValue: "Phase 2：AI 機能統合（MVP 開発中）",
     },
     upcomingNotice: "この設定カテゴリは後続フェーズで有効化されます。",
   },

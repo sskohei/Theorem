@@ -14,7 +14,7 @@ use crate::security::{normalize_relative_path, resolve_under_root};
 
 const SETTINGS_REL_PATH: &str = "settings.json";
 const BACKUPS_DIR_REL: &str = "backups";
-const DATABASE_REL_PATH: &str = "database/formuladesk.db";
+const DATABASE_REL_PATH: &str = "database/theorem.db";
 
 #[derive(Debug, Clone)]
 pub struct AppStorage {
@@ -22,7 +22,7 @@ pub struct AppStorage {
 }
 
 impl AppStorage {
-    /// Initializes the managed FormulaDesk directory hierarchy (docs/architecture.md Section 6).
+    /// Initializes the managed Theorem directory hierarchy (docs/architecture.md Section 6).
     pub fn initialize(root: PathBuf) -> AppResult<Self> {
         let subdirs = [
             "database",
@@ -147,11 +147,11 @@ impl AppStorage {
     /// Never includes OS keychain credentials.
     pub fn create_backup_archive(&self, db_snapshot_path: &Path) -> AppResult<BackupInfo> {
         let stamp = Utc::now().format("%Y%m%d-%H%M%S");
-        let base_filename = format!("formuladesk-backup-{stamp}.zip");
+        let base_filename = format!("theorem-backup-{stamp}.zip");
         let base_rel = format!("{BACKUPS_DIR_REL}/{base_filename}");
         let (filename, rel_path) = if self.resolve(&base_rel)?.exists() {
             let short_id = &Uuid::new_v4().to_string()[..8];
-            let unique_name = format!("formuladesk-backup-{stamp}-{short_id}.zip");
+            let unique_name = format!("theorem-backup-{stamp}-{short_id}.zip");
             let unique_rel = format!("{BACKUPS_DIR_REL}/{unique_name}");
             (unique_name, unique_rel)
         } else {
@@ -281,15 +281,25 @@ impl AppStorage {
 
         if !has_database {
             return Err(AppError::Backup(
-                "バックアップに formuladesk.db が含まれていません".into(),
+                "バックアップに theorem.db が含まれていません".into(),
             ));
         }
 
-        // Remove stale WAL/SHM files before replacing database
+        // Remove stale WAL/SHM files before replacing database (wait briefly on Windows for SQLite worker thread teardown)
         for suffix in ["-wal", "-shm"] {
             let side = PathBuf::from(format!("{}{}", self.database_path().display(), suffix));
             if side.exists() {
-                let _ = fs::remove_file(side);
+                for attempt in 0..15 {
+                    match fs::remove_file(&side) {
+                        Ok(()) => break,
+                        Err(err) if is_windows_transient_lock(&err) && attempt < 14 => {
+                            std::thread::sleep(std::time::Duration::from_millis(
+                                25 * (attempt + 1),
+                            ));
+                        }
+                        Err(_) => break,
+                    }
+                }
             }
         }
 
@@ -342,28 +352,70 @@ pub fn write_bytes_atomic_absolute(target: &Path, bytes: &[u8]) -> AppResult<()>
     replace_file_atomic(&tmp_path, target)
 }
 
+fn is_windows_transient_lock(err: &std::io::Error) -> bool {
+    matches!(err.raw_os_error(), Some(5) | Some(32) | Some(33))
+        || err.kind() == std::io::ErrorKind::PermissionDenied
+}
+
 fn replace_file_atomic(tmp_path: &Path, target: &Path) -> AppResult<()> {
-    // On Windows, fs::rename may fail if the destination already exists; handle cleanly.
-    if let Err(first_err) = fs::rename(tmp_path, target) {
-        if target.exists() {
-            let backup_old = target.with_extension(format!("old.{}", Uuid::new_v4()));
-            fs::rename(target, &backup_old)?;
-            match fs::rename(tmp_path, target) {
-                Ok(()) => {
-                    let _ = fs::remove_file(&backup_old);
-                }
-                Err(second_err) => {
-                    let _ = fs::rename(&backup_old, target);
+    // On Windows, fs::rename may fail if the destination already exists or a worker thread
+    // (e.g., SQLite pool teardown or AV scanner) briefly holds a handle; retry transient locks cleanly.
+    const MAX_ATTEMPTS: u64 = 15;
+    for attempt in 0..MAX_ATTEMPTS {
+        match fs::rename(tmp_path, target) {
+            Ok(()) => return Ok(()),
+            Err(first_err) => {
+                if target.exists() {
+                    let backup_old = target.with_extension(format!("old.{}", Uuid::new_v4()));
+                    match fs::rename(target, &backup_old) {
+                        Ok(()) => match fs::rename(tmp_path, target) {
+                            Ok(()) => {
+                                let _ = fs::remove_file(&backup_old);
+                                return Ok(());
+                            }
+                            Err(second_err) => {
+                                let _ = fs::rename(&backup_old, target);
+                                if is_windows_transient_lock(&second_err)
+                                    && attempt + 1 < MAX_ATTEMPTS
+                                {
+                                    std::thread::sleep(std::time::Duration::from_millis(
+                                        25 * (attempt + 1),
+                                    ));
+                                    continue;
+                                }
+                                let _ = fs::remove_file(tmp_path);
+                                return Err(second_err.into());
+                            }
+                        },
+                        Err(move_old_err) => {
+                            if is_windows_transient_lock(&move_old_err)
+                                && attempt + 1 < MAX_ATTEMPTS
+                            {
+                                std::thread::sleep(std::time::Duration::from_millis(
+                                    25 * (attempt + 1),
+                                ));
+                                continue;
+                            }
+                            let _ = fs::remove_file(tmp_path);
+                            return Err(move_old_err.into());
+                        }
+                    }
+                } else {
+                    if is_windows_transient_lock(&first_err) && attempt + 1 < MAX_ATTEMPTS {
+                        std::thread::sleep(std::time::Duration::from_millis(25 * (attempt + 1)));
+                        continue;
+                    }
                     let _ = fs::remove_file(tmp_path);
-                    return Err(second_err.into());
+                    return Err(first_err.into());
                 }
             }
-        } else {
-            let _ = fs::remove_file(tmp_path);
-            return Err(first_err.into());
         }
     }
-    Ok(())
+    let _ = fs::remove_file(tmp_path);
+    Err(AppError::Storage(format!(
+        "ファイルのアトミック置換に失敗しました: {}",
+        target.display()
+    )))
 }
 
 fn compute_dir_size(path: &Path) -> u64 {

@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    formuladesk_lib::run()
+    theorem_lib::run()
 }

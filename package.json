@@ -1,5 +1,5 @@
 {
-  "name": "formuladesk",
+  "name": "theorem",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,10 +17,15 @@
     "@tauri-apps/api": "^2.12.5",
     "@tauri-apps/plugin-dialog": "^2.8.4",
     "clsx": "^2.1.1",
+    "katex": "^0.19.1",
     "lucide-react": "^0.511.0",
     "pdfjs-dist": "^5.4.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "tailwind-merge": "^3.2.0",
     "zustand": "^5.0.3"
   },

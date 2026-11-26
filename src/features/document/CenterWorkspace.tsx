@@ -3,11 +3,17 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { useAiWorkspaceStore } from "@/stores/useAiWorkspaceStore";
 import { useDocumentStore } from "@/stores/useDocumentStore";
 import { useLayoutStore, type CenterTab } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
+import type { PageImagePayload } from "@/types/ipc";
 import { ImageViewer } from "./ImageViewer";
 import { PdfViewer } from "./PdfViewer";
+import { RecognizedProblemsTab } from "./RecognizedProblemsTab";
+import { SolutionEditorTab } from "./SolutionEditorTab";
+import { SolutionPdfTab } from "./SolutionPdfTab";
+import { SolutionVersionsTab } from "./SolutionVersionsTab";
 
 interface CenterWorkspaceProps {
   onImportClick: () => void;
@@ -17,27 +23,77 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
   const t = useI18n();
   const { activeTab, setActiveTab } = useLayoutStore();
   const {
+    settings,
     duplicateNotice,
     error: libraryError,
     dismissDuplicateNotice,
     clearError,
     selectDocument,
   } = useLibraryStore();
-  const { detail, primaryBase64, loading, error: docError } = useDocumentStore();
+  const {
+    detail,
+    primaryBase64,
+    loading,
+    error: docError,
+    pageRangeStart,
+    pageRangeEnd,
+  } = useDocumentStore();
+  const {
+    problems,
+    solutions,
+    recognizing,
+    error: aiError,
+    recognize,
+    clearError: clearAiError,
+  } = useAiWorkspaceStore();
 
-  const tabs: { id: CenterTab; label: string; phaseBadge?: string }[] = [
+  const tabs: { id: CenterTab; label: string; count?: number; phaseBadge?: string }[] = [
     { id: "original", label: t.tabs.original },
-    { id: "recognized", label: t.tabs.recognized, phaseBadge: "Phase 2" },
-    { id: "solutionPdf", label: t.tabs.solutionPdf, phaseBadge: "Phase 2" },
-    { id: "solutionEditor", label: t.tabs.solutionEditor, phaseBadge: "Phase 2" },
+    { id: "recognized", label: t.tabs.recognized, count: problems.length || undefined },
+    { id: "solutionPdf", label: t.tabs.solutionPdf },
+    { id: "solutionEditor", label: t.tabs.solutionEditor },
     { id: "calculations", label: t.tabs.calculations, phaseBadge: "Phase 3" },
-    { id: "versions", label: t.tabs.versions, phaseBadge: "Phase 2" },
+    { id: "versions", label: t.tabs.versions, count: solutions.length || undefined },
   ];
 
   const primaryAttachment =
     detail?.attachments.find((a) => a.id === detail.document.primaryAttachmentId) ?? null;
 
-  const activeError = libraryError ?? docError;
+  const activeError = libraryError ?? docError ?? aiError;
+
+  const handleDismissError = () => {
+    clearError();
+    clearAiError();
+  };
+
+  const handleRecognizeFromPdf = async (
+    pages: PageImagePayload[],
+    croppedPngBase64: string | null,
+  ) => {
+    if (!detail) return;
+    setActiveTab("recognized");
+    await recognize({
+      documentId: detail.document.id,
+      recognitionMode: croppedPngBase64 ? "page_range" : settings.defaultRecognitionMode,
+      pageRangeStart,
+      pageRangeEnd,
+      pageImages: pages,
+      croppedRegionPngBase64: croppedPngBase64,
+    });
+  };
+
+  const handleRecognizeFromImage = async () => {
+    if (!detail) return;
+    setActiveTab("recognized");
+    await recognize({
+      documentId: detail.document.id,
+      recognitionMode: settings.defaultRecognitionMode,
+      pageRangeStart: null,
+      pageRangeEnd: null,
+      pageImages: [],
+      croppedRegionPngBase64: null,
+    });
+  };
 
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-slate-50 dark:bg-slate-950">
@@ -64,6 +120,11 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
               )}
             >
               <span>{tab.label}</span>
+              {tab.count !== undefined && (
+                <Badge variant="info" className="px-1 py-0 text-[9px]">
+                  {tab.count}
+                </Badge>
+              )}
               {tab.phaseBadge && (
                 <Badge variant="outline" className="px-1 py-0 text-[9px] opacity-75">
                   {tab.phaseBadge}
@@ -87,7 +148,12 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
             </div>
             {activeError.detail && <div className="mt-0.5 opacity-85">{activeError.detail}</div>}
           </div>
-          <Button size="icon" variant="ghost" onClick={clearError} aria-label={t.common.dismiss}>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={handleDismissError}
+            aria-label={t.common.dismiss}
+          >
             <X className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -144,9 +210,16 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
                 attachment={primaryAttachment}
                 base64Data={primaryBase64}
                 hasSavedThumbnail={detail.document.thumbnailAttachmentId !== null}
+                onRecognizePages={(pages, crop) => void handleRecognizeFromPdf(pages, crop)}
+                recognizing={recognizing}
               />
             ) : (
-              <ImageViewer attachment={primaryAttachment} base64Data={primaryBase64} />
+              <ImageViewer
+                attachment={primaryAttachment}
+                base64Data={primaryBase64}
+                onRecognizeImage={() => void handleRecognizeFromImage()}
+                recognizing={recognizing}
+              />
             )
           ) : (
             <div className="flex h-full flex-col items-center justify-center p-8 text-center">
@@ -165,20 +238,24 @@ export function CenterWorkspace({ onImportClick }: CenterWorkspaceProps) {
               </Button>
             </div>
           )
+        ) : activeTab === "recognized" ? (
+          <RecognizedProblemsTab />
+        ) : activeTab === "solutionPdf" ? (
+          <SolutionPdfTab />
+        ) : activeTab === "solutionEditor" ? (
+          <SolutionEditorTab />
+        ) : activeTab === "versions" ? (
+          <SolutionVersionsTab />
         ) : (
           <div className="flex h-full flex-col items-center justify-center p-8 text-center">
             <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
               <Layers className="h-6 w-6" />
             </div>
             <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              {activeTab === "calculations"
-                ? t.viewer.phase3PlannedTitle
-                : t.viewer.phase2PlannedTitle}
+              {t.viewer.phase3PlannedTitle}
             </h2>
             <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-              {activeTab === "calculations"
-                ? t.viewer.phase3PlannedDesc
-                : t.viewer.phase2PlannedDesc}
+              {t.viewer.phase3PlannedDesc}
             </p>
           </div>
         )}

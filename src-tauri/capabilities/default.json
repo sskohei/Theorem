@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Minimal capability for the FormulaDesk main window. All SQLite, storage, and file operations run strictly through validated Rust commands.",
+  "description": "Minimal capability for the Theorem main window. All SQLite, keyring, storage, AI harness, and file operations run strictly through validated Rust commands.",
   "windows": ["main"],
   "permissions": [
     "core:default",

@@ -1,10 +1,15 @@
 use tauri::State;
 
+use crate::agents::adapter::PermissionDecision;
 use crate::application::AppState;
 use crate::domain::{
-    AppSettings, AttachmentBinaryResponse, AttachmentInfo, BackupInfo, BootstrapState,
-    DocumentDetail, DocumentFilter, DocumentSummary, Folder, ImportBatchResult,
-    ImportedDocumentItem, StorageStats, Subject, Tag, UpdateDocumentRequest,
+    AgentProfile, AgentStatus, AppSettings, AttachmentBinaryResponse, AttachmentInfo, BackupInfo,
+    BootstrapState, ChatMessage, Conversation, DocumentDetail, DocumentFilter, DocumentSummary,
+    Folder, GenerateSolutionRequest, ImportBatchResult, ImportedDocumentItem, Problem,
+    RecognizeProblemsRequest, RecognizeProblemsResult, SaveAgentProfileRequest,
+    SaveSolutionEditRequest, SendChatMessageRequest, SendChatMessageResult, Solution,
+    SolutionOperationResult, StorageStats, Subject, Tag, UpdateDocumentRequest,
+    UpsertProblemRequest,
 };
 use crate::error::ApiError;
 
@@ -280,6 +285,287 @@ pub async fn restore_backup(
 ) -> Result<BootstrapState, ApiError> {
     state
         .restore_backup(&backup_rel_path)
+        .await
+        .map_err(ApiError::from)
+}
+
+// ============================================================================
+// Phase 2: Agents, Problems, Solutions, Typst PDF, Chat
+// ============================================================================
+
+#[tauri::command]
+pub async fn list_agent_profiles(
+    state: State<'_, AppState>,
+) -> Result<Vec<AgentProfile>, ApiError> {
+    state.list_agent_profiles().await.map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn save_agent_profile(
+    state: State<'_, AppState>,
+    input: SaveAgentProfileRequest,
+) -> Result<AgentProfile, ApiError> {
+    state
+        .save_agent_profile(&input)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn delete_agent_profile(state: State<'_, AppState>, id: String) -> Result<(), ApiError> {
+    state
+        .delete_agent_profile(&id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn check_agent_status(
+    state: State<'_, AppState>,
+    profile_id: String,
+) -> Result<AgentStatus, ApiError> {
+    state
+        .check_agent_status(&profile_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn detect_all_agents(state: State<'_, AppState>) -> Result<Vec<AgentStatus>, ApiError> {
+    state.detect_all_agents().await.map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn set_agent_api_key(
+    state: State<'_, AppState>,
+    profile_id: String,
+    api_key: String,
+) -> Result<AgentProfile, ApiError> {
+    state
+        .set_agent_api_key(&profile_id, &api_key)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn delete_agent_api_key(
+    state: State<'_, AppState>,
+    profile_id: String,
+) -> Result<AgentProfile, ApiError> {
+    state
+        .delete_agent_api_key(&profile_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn cancel_agent_run(state: State<'_, AppState>, run_id: String) -> Result<(), ApiError> {
+    state
+        .cancel_agent_run(&run_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn respond_agent_permission(
+    state: State<'_, AppState>,
+    run_id: String,
+    request_id: String,
+    decision: PermissionDecision,
+) -> Result<(), ApiError> {
+    state
+        .respond_agent_permission(&run_id, &request_id, decision)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn list_problems(
+    state: State<'_, AppState>,
+    document_id: String,
+) -> Result<Vec<Problem>, ApiError> {
+    state
+        .list_problems(&document_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn upsert_problem(
+    state: State<'_, AppState>,
+    input: UpsertProblemRequest,
+) -> Result<Problem, ApiError> {
+    state.upsert_problem(&input).await.map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn delete_problem(
+    state: State<'_, AppState>,
+    problem_id: String,
+) -> Result<(), ApiError> {
+    state
+        .delete_problem(&problem_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn split_problem(
+    state: State<'_, AppState>,
+    problem_id: String,
+    first_statement: String,
+    second_statement: String,
+    second_subproblem_number: Option<String>,
+) -> Result<Vec<Problem>, ApiError> {
+    state
+        .split_problem(
+            &problem_id,
+            &first_statement,
+            &second_statement,
+            second_subproblem_number.as_deref(),
+        )
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn merge_problems(
+    state: State<'_, AppState>,
+    primary_id: String,
+    secondary_id: String,
+) -> Result<Vec<Problem>, ApiError> {
+    state
+        .merge_problems(&primary_id, &secondary_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn recognize_problems(
+    state: State<'_, AppState>,
+    input: RecognizeProblemsRequest,
+) -> Result<RecognizeProblemsResult, ApiError> {
+    state
+        .recognize_problems(&input)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn list_solutions(
+    state: State<'_, AppState>,
+    document_id: String,
+    problem_id: Option<String>,
+) -> Result<Vec<Solution>, ApiError> {
+    state
+        .list_solutions(&document_id, problem_id.as_deref())
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn generate_solution(
+    state: State<'_, AppState>,
+    input: GenerateSolutionRequest,
+) -> Result<SolutionOperationResult, ApiError> {
+    state
+        .generate_solution(&input)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn save_solution_edit(
+    state: State<'_, AppState>,
+    input: SaveSolutionEditRequest,
+) -> Result<SolutionOperationResult, ApiError> {
+    state
+        .save_solution_edit(&input)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn recompile_solution_pdf(
+    state: State<'_, AppState>,
+    solution_id: String,
+) -> Result<SolutionOperationResult, ApiError> {
+    state
+        .recompile_solution_pdf(&solution_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn restore_solution_version(
+    state: State<'_, AppState>,
+    solution_id: String,
+) -> Result<SolutionOperationResult, ApiError> {
+    state
+        .restore_solution_version(&solution_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn list_conversations(
+    state: State<'_, AppState>,
+    document_id: String,
+) -> Result<Vec<Conversation>, ApiError> {
+    state
+        .list_conversations(&document_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn create_conversation(
+    state: State<'_, AppState>,
+    document_id: String,
+    problem_id: Option<String>,
+    solution_id: Option<String>,
+    title: String,
+) -> Result<Conversation, ApiError> {
+    state
+        .create_conversation(
+            &document_id,
+            problem_id.as_deref(),
+            solution_id.as_deref(),
+            &title,
+        )
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn delete_conversation(
+    state: State<'_, AppState>,
+    conversation_id: String,
+) -> Result<(), ApiError> {
+    state
+        .delete_conversation(&conversation_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn list_messages(
+    state: State<'_, AppState>,
+    conversation_id: String,
+) -> Result<Vec<ChatMessage>, ApiError> {
+    state
+        .list_messages(&conversation_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn send_chat_message(
+    state: State<'_, AppState>,
+    input: SendChatMessageRequest,
+) -> Result<SendChatMessageResult, ApiError> {
+    state
+        .send_chat_message(&input)
         .await
         .map_err(ApiError::from)
 }

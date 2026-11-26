@@ -33,6 +33,12 @@ vi.mock("@/services/tauriClient", async (importOriginal) => {
       listBackups: vi.fn(),
       createBackup: vi.fn(),
       cleanupTempFiles: vi.fn(),
+      listAgentProfiles: vi.fn(),
+      checkAgentStatus: vi.fn(),
+      listProblems: vi.fn(),
+      listSolutions: vi.fn(),
+      listConversations: vi.fn(),
+      listMessages: vi.fn(),
     },
   };
 });
@@ -57,7 +63,7 @@ const SAMPLE_DOC: DocumentSummary = {
 
 const SAMPLE_BOOT: BootstrapState = {
   appVersion: "0.1.0",
-  dataRootDisplay: "C:\\Users\\test\\AppData\\Roaming\\FormulaDesk",
+  dataRootDisplay: "C:\\Users\\test\\AppData\\Roaming\\Theorem",
   subjects: [
     {
       id: "sub-math",
@@ -116,6 +122,26 @@ const SAMPLE_BOOT: BootstrapState = {
     defaultRecognitionMode: "printed_only",
     leftSidebarWidth: 280,
     rightSidebarWidth: 320,
+    cloudAiConsentAccepted: false,
+    pdf: {
+      defaultTemplate: "auto",
+      paperSize: "a4",
+      showModelName: true,
+      showGeneratedAt: true,
+      showVersionNumber: true,
+    },
+    agentAssignments: {
+      extractionProfileId: null,
+      solutionProfileId: null,
+      chatProfileId: null,
+      verificationProfileId: null,
+      revisionProfileId: null,
+    },
+    prompts: {
+      mathematicsCustomInstructions: "",
+      physicsCustomInstructions: "",
+      modeCustomInstructions: "",
+    },
   },
 };
 
@@ -140,7 +166,7 @@ const SAMPLE_DETAIL: DocumentDetail = {
   tags: SAMPLE_BOOT.tags,
 };
 
-describe("FormulaDesk Phase 1 App Shell & Stores", () => {
+describe("Theorem App Shell & Stores", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useLayoutStore.setState({
@@ -199,6 +225,26 @@ describe("FormulaDesk Phase 1 App Shell & Stores", () => {
       attachmentCount: 1,
     });
     vi.mocked(tauriClient.listBackups).mockResolvedValue([]);
+    vi.mocked(tauriClient.listAgentProfiles).mockResolvedValue([
+      {
+        id: "prof-codex",
+        name: "OpenAI Codex",
+        providerKind: "codex",
+        executablePath: null,
+        args: [],
+        defaultModel: null,
+        authMode: "official_harness",
+        hasKeyringSecret: false,
+        isEnabled: true,
+        isDefault: true,
+        createdAt: "2026-11-26T00:00:00Z",
+        updatedAt: "2026-11-26T00:00:00Z",
+      },
+    ]);
+    vi.mocked(tauriClient.listProblems).mockResolvedValue([]);
+    vi.mocked(tauriClient.listSolutions).mockResolvedValue([]);
+    vi.mocked(tauriClient.listConversations).mockResolvedValue([]);
+    vi.mocked(tauriClient.listMessages).mockResolvedValue([]);
   });
 
   it("renders 3-column workspace, subjects, folders, document list, and image viewer", async () => {

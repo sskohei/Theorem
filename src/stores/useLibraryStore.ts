@@ -85,6 +85,26 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultRecognitionMode: "printed_only",
   leftSidebarWidth: 280,
   rightSidebarWidth: 320,
+  cloudAiConsentAccepted: false,
+  pdf: {
+    defaultTemplate: "auto",
+    paperSize: "a4",
+    showModelName: true,
+    showGeneratedAt: true,
+    showVersionNumber: true,
+  },
+  agentAssignments: {
+    extractionProfileId: null,
+    solutionProfileId: null,
+    chatProfileId: null,
+    verificationProfileId: null,
+    revisionProfileId: null,
+  },
+  prompts: {
+    mathematicsCustomInstructions: "",
+    physicsCustomInstructions: "",
+    modeCustomInstructions: "",
+  },
 };
 
 function buildFilter(s: LibraryState): DocumentFilter {

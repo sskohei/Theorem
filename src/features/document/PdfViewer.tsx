@@ -9,6 +9,7 @@ import {
   Download,
   FileText,
   PanelLeft,
+  Sparkles,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -18,7 +19,7 @@ import { useI18n } from "@/lib/i18n";
 import { base64ToUint8Array, cn } from "@/lib/utils";
 import { tauriClient } from "@/services/tauriClient";
 import { useDocumentStore } from "@/stores/useDocumentStore";
-import type { AttachmentInfo } from "@/types/ipc";
+import type { AttachmentInfo, PageImagePayload } from "@/types/ipc";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -27,6 +28,8 @@ interface PdfViewerProps {
   attachment: AttachmentInfo;
   base64Data: string;
   hasSavedThumbnail: boolean;
+  onRecognizePages?: (pages: PageImagePayload[], croppedPngBase64: string | null) => void;
+  recognizing?: boolean;
 }
 
 interface CropRect {
@@ -41,6 +44,8 @@ export function PdfViewer({
   attachment,
   base64Data,
   hasSavedThumbnail,
+  onRecognizePages,
+  recognizing = false,
 }: PdfViewerProps) {
   const t = useI18n();
   const {
@@ -232,6 +237,48 @@ export function PdfViewer({
     setCroppedPreviewUrl(canvas.toDataURL("image/png"));
   };
 
+  const handleTriggerRecognize = async () => {
+    if (!onRecognizePages) return;
+    const cropB64 = croppedPreviewUrl?.includes(",")
+      ? (croppedPreviewUrl.split(",")[1] ?? null)
+      : null;
+    if (cropB64) {
+      onRecognizePages([], cropB64);
+      return;
+    }
+    if (!pdfDoc) {
+      onRecognizePages([], null);
+      return;
+    }
+    const start = Math.max(1, pageRangeStart);
+    const end = Math.min(pdfDoc.numPages, Math.max(start, pageRangeEnd), start + 4);
+    const payloads: PageImagePayload[] = [];
+    for (let p = start; p <= end; p++) {
+      try {
+        const page = await pdfDoc.getPage(p);
+        const vp = page.getViewport({ scale: 1.5 });
+        const off = document.createElement("canvas");
+        off.width = Math.max(1, Math.floor(vp.width));
+        off.height = Math.max(1, Math.floor(vp.height));
+        const ctx = off.getContext("2d");
+        let pngBase64 = "";
+        if (ctx) {
+          await page.render({ canvasContext: ctx, viewport: vp, canvas: off }).promise;
+          pngBase64 = off.toDataURL("image/png").split(",")[1] ?? "";
+        }
+        const tc = await page.getTextContent();
+        const text = tc.items
+          .map((item) => ("str" in item ? item.str : ""))
+          .filter(Boolean)
+          .join(" ");
+        payloads.push({ pageNumber: p, pngBase64, extractedText: text || null });
+      } catch {
+        // Continue remaining pages
+      }
+    }
+    onRecognizePages(payloads, null);
+  };
+
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!cropMode) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -366,6 +413,18 @@ export function PdfViewer({
           <Crop className="h-3.5 w-3.5" />
           <span>{t.viewer.preprocess}</span>
         </Button>
+
+        {onRecognizePages && (
+          <Button
+            variant="primary"
+            size="xs"
+            disabled={recognizing}
+            onClick={() => void handleTriggerRecognize()}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>{recognizing ? "認識中..." : "問題認識"}</span>
+          </Button>
+        )}
 
         <Button
           variant="outline"

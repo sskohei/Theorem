@@ -23,7 +23,8 @@ import { cn, formatBytes, formatShortDate } from "@/lib/utils";
 import { normalizeApiError, tauriClient } from "@/services/tauriClient";
 import { useLayoutStore, type SettingsCategory } from "@/stores/useLayoutStore";
 import { useLibraryStore } from "@/stores/useLibraryStore";
-import type { BackupInfo, RecognitionMode, StorageStats, ThemePreference } from "@/types/ipc";
+import type { BackupInfo, PdfSettings, RecognitionMode, StorageStats, ThemePreference } from "@/types/ipc";
+import { AgentSettingsPanel, ModelSettingsPanel } from "./AgentSettingsSection";
 
 export function SettingsModal() {
   const t = useI18n();
@@ -82,10 +83,10 @@ export function SettingsModal() {
   }[] = [
     { id: "general", label: t.settings.categories.general, icon: Sliders },
     { id: "appearance", label: t.settings.categories.appearance, icon: Palette },
-    { id: "agents", label: t.settings.categories.agents, icon: Bot, phase: "Phase 2" },
-    { id: "models", label: t.settings.categories.models, icon: Cpu, phase: "Phase 2" },
-    { id: "prompts", label: t.settings.categories.prompts, icon: MessageSquareCode, phase: "Phase 2" },
-    { id: "pdf", label: t.settings.categories.pdf, icon: FileText, phase: "Phase 2" },
+    { id: "agents", label: t.settings.categories.agents, icon: Bot },
+    { id: "models", label: t.settings.categories.models, icon: Cpu },
+    { id: "prompts", label: t.settings.categories.prompts, icon: MessageSquareCode },
+    { id: "pdf", label: t.settings.categories.pdf, icon: FileText },
     { id: "drive", label: t.settings.categories.drive, icon: Cloud, phase: "Phase 4" },
     { id: "scienceMcp", label: t.settings.categories.scienceMcp, icon: Calculator, phase: "Phase 3" },
     { id: "storage", label: t.settings.categories.storage, icon: HardDrive },
@@ -447,7 +448,178 @@ export function SettingsModal() {
               </div>
             )}
 
-            {!["general", "appearance", "storage", "security", "about"].includes(
+            {settingsCategory === "agents" && <AgentSettingsPanel />}
+
+            {settingsCategory === "models" && <ModelSettingsPanel />}
+
+            {settingsCategory === "prompts" && (
+              <div className="space-y-4">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  大学数学・大学物理・解答モードごとの追加プロンプト指示を設定できます（任意シェル禁止や出力スキーマ検証などのシステム安全制約は上書きできません）。
+                </p>
+                <div>
+                  <label className="mb-1 block font-medium text-slate-700 dark:text-slate-200">
+                    大学数学向け追加指示
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={settings.prompts.mathematicsCustomInstructions}
+                    onChange={(e) =>
+                      void saveSettings({
+                        ...settings,
+                        prompts: {
+                          ...settings.prompts,
+                          mathematicsCustomInstructions: e.target.value,
+                        },
+                      })
+                    }
+                    placeholder="例: 定義域と定理の仮定を必ず明示すること"
+                    className="w-full rounded-md border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block font-medium text-slate-700 dark:text-slate-200">
+                    大学物理向け追加指示
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={settings.prompts.physicsCustomInstructions}
+                    onChange={(e) =>
+                      void saveSettings({
+                        ...settings,
+                        prompts: {
+                          ...settings.prompts,
+                          physicsCustomInstructions: e.target.value,
+                        },
+                      })
+                    }
+                    placeholder="例: 座標系・SI 単位・極限ケースの考察を必ず含めること"
+                    className="w-full rounded-md border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block font-medium text-slate-700 dark:text-slate-200">
+                    モード共通追加指示
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={settings.prompts.modeCustomInstructions}
+                    onChange={(e) =>
+                      void saveSettings({
+                        ...settings,
+                        prompts: {
+                          ...settings.prompts,
+                          modeCustomInstructions: e.target.value,
+                        },
+                      })
+                    }
+                    placeholder="例: 途中式の変形理由を簡潔に添える"
+                    className="w-full rounded-md border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-800"
+                  />
+                </div>
+              </div>
+            )}
+
+            {settingsCategory === "pdf" && (
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-1 block font-medium text-slate-700 dark:text-slate-200">
+                    既定テンプレート
+                  </label>
+                  <select
+                    aria-label="既定PDFテンプレート"
+                    value={settings.pdf.defaultTemplate}
+                    onChange={(e) =>
+                      void saveSettings({
+                        ...settings,
+                        pdf: {
+                          ...settings.pdf,
+                          defaultTemplate: e.target.value as PdfSettings["defaultTemplate"],
+                        },
+                      }).then(() => setStatusMessage(t.settings.general.saveSuccess))
+                    }
+                    className="h-8 w-64 rounded-md border border-slate-300 bg-white px-2.5 text-xs dark:border-slate-700 dark:bg-slate-800"
+                  >
+                    <option value="auto">自動（解答モードに合わせる）</option>
+                    <option value="detailed">詳細解説 (detailed.typ)</option>
+                    <option value="concise">簡潔模範解答 (concise.typ)</option>
+                    <option value="mathematics">大学数学向け (mathematics.typ)</option>
+                    <option value="physics">大学物理向け (physics.typ)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-medium text-slate-700 dark:text-slate-200">
+                    用紙サイズ
+                  </label>
+                  <select
+                    aria-label="PDF用紙サイズ"
+                    value={settings.pdf.paperSize}
+                    onChange={(e) =>
+                      void saveSettings({
+                        ...settings,
+                        pdf: {
+                          ...settings.pdf,
+                          paperSize: e.target.value as PdfSettings["paperSize"],
+                        },
+                      }).then(() => setStatusMessage(t.settings.general.saveSuccess))
+                    }
+                    className="h-8 w-64 rounded-md border border-slate-300 bg-white px-2.5 text-xs dark:border-slate-700 dark:bg-slate-800"
+                  >
+                    <option value="a4">A4（既定）</option>
+                    <option value="b5">B5</option>
+                    <option value="letter">US Letter</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+                  <div className="font-medium text-slate-700 dark:text-slate-200">
+                    PDF ヘッダー・メタデータ表示設定
+                  </div>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={settings.pdf.showModelName}
+                      onChange={(e) =>
+                        void saveSettings({
+                          ...settings,
+                          pdf: { ...settings.pdf, showModelName: e.target.checked },
+                        })
+                      }
+                    />
+                    <span>使用した AI モデル名を PDF に表示する</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={settings.pdf.showGeneratedAt}
+                      onChange={(e) =>
+                        void saveSettings({
+                          ...settings,
+                          pdf: { ...settings.pdf, showGeneratedAt: e.target.checked },
+                        })
+                      }
+                    />
+                    <span>生成日時を PDF に表示する</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={settings.pdf.showVersionNumber}
+                      onChange={(e) =>
+                        void saveSettings({
+                          ...settings,
+                          pdf: { ...settings.pdf, showVersionNumber: e.target.checked },
+                        })
+                      }
+                    />
+                    <span>解答バージョン番号を PDF に表示する</span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {!["general", "appearance", "agents", "models", "prompts", "pdf", "storage", "security", "about"].includes(
               settingsCategory,
             ) && (
               <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-slate-500 dark:border-slate-700 dark:text-slate-400">

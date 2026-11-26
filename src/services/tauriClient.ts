@@ -1,23 +1,39 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
+  AgentProfile,
+  AgentStatus,
   ApiError,
   AppSettings,
   AttachmentBinaryResponse,
   AttachmentInfo,
   BackupInfo,
   BootstrapState,
+  ChatMessage,
+  Conversation,
   DocumentDetail,
   DocumentFilter,
   DocumentSummary,
   Folder,
+  GenerateSolutionRequest,
   ImportBatchResult,
   ImportedDocumentItem,
+  PermissionDecision,
+  Problem,
   RecognitionMode,
+  RecognizeProblemsRequest,
+  RecognizeProblemsResult,
+  SaveAgentProfileRequest,
+  SaveSolutionEditRequest,
+  SendChatMessageRequest,
+  SendChatMessageResult,
+  Solution,
+  SolutionOperationResult,
   StorageStats,
   Subject,
   SubjectCategory,
   Tag,
+  UpsertProblemRequest,
 } from "@/types/ipc";
 
 export function isTauriRuntime(): boolean {
@@ -212,6 +228,116 @@ export const tauriClient = {
   },
   restoreBackup(backupRelPath: string): Promise<BootstrapState> {
     return callCommand<BootstrapState>("restore_backup", { backupRelPath });
+  },
+
+  // Phase 2: Agents & OS Keychain
+  listAgentProfiles(): Promise<AgentProfile[]> {
+    return callCommand<AgentProfile[]>("list_agent_profiles");
+  },
+  saveAgentProfile(input: SaveAgentProfileRequest): Promise<AgentProfile> {
+    return callCommand<AgentProfile>("save_agent_profile", { input });
+  },
+  deleteAgentProfile(id: string): Promise<void> {
+    return callCommand<void>("delete_agent_profile", { id });
+  },
+  checkAgentStatus(profileId: string): Promise<AgentStatus> {
+    return callCommand<AgentStatus>("check_agent_status", { profileId });
+  },
+  detectAllAgents(): Promise<AgentStatus[]> {
+    return callCommand<AgentStatus[]>("detect_all_agents");
+  },
+  setAgentApiKey(profileId: string, apiKey: string): Promise<AgentProfile> {
+    return callCommand<AgentProfile>("set_agent_api_key", { profileId, apiKey });
+  },
+  deleteAgentApiKey(profileId: string): Promise<AgentProfile> {
+    return callCommand<AgentProfile>("delete_agent_api_key", { profileId });
+  },
+  cancelAgentRun(runId: string): Promise<void> {
+    return callCommand<void>("cancel_agent_run", { runId });
+  },
+  respondAgentPermission(
+    runId: string,
+    requestId: string,
+    decision: PermissionDecision,
+  ): Promise<void> {
+    return callCommand<void>("respond_agent_permission", { runId, requestId, decision });
+  },
+
+  // Phase 2: Problems & Recognition
+  listProblems(documentId: string): Promise<Problem[]> {
+    return callCommand<Problem[]>("list_problems", { documentId });
+  },
+  upsertProblem(input: UpsertProblemRequest): Promise<Problem> {
+    return callCommand<Problem>("upsert_problem", { input });
+  },
+  deleteProblem(problemId: string): Promise<void> {
+    return callCommand<void>("delete_problem", { problemId });
+  },
+  splitProblem(
+    problemId: string,
+    firstStatement: string,
+    secondStatement: string,
+    secondSubproblemNumber?: string | null,
+  ): Promise<Problem[]> {
+    return callCommand<Problem[]>("split_problem", {
+      problemId,
+      firstStatement,
+      secondStatement,
+      secondSubproblemNumber: secondSubproblemNumber ?? null,
+    });
+  },
+  mergeProblems(primaryId: string, secondaryId: string): Promise<Problem[]> {
+    return callCommand<Problem[]>("merge_problems", { primaryId, secondaryId });
+  },
+  recognizeProblems(input: RecognizeProblemsRequest): Promise<RecognizeProblemsResult> {
+    return callCommand<RecognizeProblemsResult>("recognize_problems", { input });
+  },
+
+  // Phase 2: Solutions & Typst PDF
+  listSolutions(documentId: string, problemId?: string | null): Promise<Solution[]> {
+    return callCommand<Solution[]>("list_solutions", {
+      documentId,
+      problemId: problemId ?? null,
+    });
+  },
+  generateSolution(input: GenerateSolutionRequest): Promise<SolutionOperationResult> {
+    return callCommand<SolutionOperationResult>("generate_solution", { input });
+  },
+  saveSolutionEdit(input: SaveSolutionEditRequest): Promise<SolutionOperationResult> {
+    return callCommand<SolutionOperationResult>("save_solution_edit", { input });
+  },
+  recompileSolutionPdf(solutionId: string): Promise<SolutionOperationResult> {
+    return callCommand<SolutionOperationResult>("recompile_solution_pdf", { solutionId });
+  },
+  restoreSolutionVersion(solutionId: string): Promise<SolutionOperationResult> {
+    return callCommand<SolutionOperationResult>("restore_solution_version", { solutionId });
+  },
+
+  // Phase 2: Conversations & Chat
+  listConversations(documentId: string): Promise<Conversation[]> {
+    return callCommand<Conversation[]>("list_conversations", { documentId });
+  },
+  createConversation(
+    documentId: string,
+    title: string,
+    problemId?: string | null,
+    solutionId?: string | null,
+  ): Promise<Conversation> {
+    return callCommand<Conversation>("create_conversation", {
+      documentId,
+      problemId: problemId ?? null,
+      solutionId: solutionId ?? null,
+      title,
+    });
+  },
+  deleteConversation(conversationId: string): Promise<void> {
+    return callCommand<void>("delete_conversation", { conversationId });
+  },
+  listMessages(conversationId: string): Promise<ChatMessage[]> {
+    return callCommand<ChatMessage[]>("list_messages", { conversationId });
+  },
+  sendChatMessage(input: SendChatMessageRequest): Promise<SendChatMessageResult> {
+    return callCommand<SendChatMessageResult>("send_chat_message", { input });
   },
 
   // Native Dialogs

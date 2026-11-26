@@ -1,13 +1,17 @@
+pub mod agents;
 pub mod application;
 pub mod commands;
 pub mod database;
 pub mod document;
 pub mod domain;
 pub mod error;
+pub mod pdf;
+pub mod prompts;
 pub mod security;
 pub mod storage;
 
-use tauri::Manager;
+use std::sync::Arc;
+use tauri::{Emitter, Manager};
 
 use crate::application::AppState;
 
@@ -22,6 +26,10 @@ pub fn run() {
                 .map_err(|e| std::io::Error::other(e.to_string()))?;
             let state = tauri::async_runtime::block_on(AppState::initialize(data_root))
                 .map_err(|e| std::io::Error::other(e.to_string()))?;
+            let handle = app.handle().clone();
+            tauri::async_runtime::block_on(state.set_agent_event_emitter(Arc::new(move |env| {
+                let _ = handle.emit("agent://event", env);
+            })));
             app.manage(state);
             Ok(())
         })
@@ -56,10 +64,35 @@ pub fn run() {
             commands::create_backup,
             commands::list_backups,
             commands::restore_backup,
+            commands::list_agent_profiles,
+            commands::save_agent_profile,
+            commands::delete_agent_profile,
+            commands::check_agent_status,
+            commands::detect_all_agents,
+            commands::set_agent_api_key,
+            commands::delete_agent_api_key,
+            commands::cancel_agent_run,
+            commands::respond_agent_permission,
+            commands::list_problems,
+            commands::upsert_problem,
+            commands::delete_problem,
+            commands::split_problem,
+            commands::merge_problems,
+            commands::recognize_problems,
+            commands::list_solutions,
+            commands::generate_solution,
+            commands::save_solution_edit,
+            commands::recompile_solution_pdf,
+            commands::restore_solution_version,
+            commands::list_conversations,
+            commands::create_conversation,
+            commands::delete_conversation,
+            commands::list_messages,
+            commands::send_chat_message,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {
-        eprintln!("FormulaDesk failed to start: {err}");
+        eprintln!("Theorem failed to start: {err}");
         std::process::exit(1);
     }
 }

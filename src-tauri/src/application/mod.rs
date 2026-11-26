@@ -1,10 +1,14 @@
+pub mod ai_service;
+
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+use crate::agents::manager::{AgentManager, EventEmitter};
 use crate::database::Database;
 use crate::database::library_repo;
 use crate::document;
@@ -18,9 +22,10 @@ use crate::security::DiagnosticLogger;
 use crate::storage::AppStorage;
 
 pub struct AppState {
-    db: RwLock<Database>,
-    storage: AppStorage,
-    logger: DiagnosticLogger,
+    pub(crate) db: RwLock<Database>,
+    pub(crate) storage: AppStorage,
+    pub(crate) logger: DiagnosticLogger,
+    pub(crate) agents: Arc<AgentManager>,
 }
 
 impl AppState {
@@ -28,12 +33,19 @@ impl AppState {
         let storage = AppStorage::initialize(data_root)?;
         let logger = DiagnosticLogger::new(&storage.logs_dir());
         let db = Database::connect(&storage.database_path()).await?;
-        logger.log_info("app_started", "FormulaDesk core initialized");
+        let workspaces_dir = storage.root().join("workspaces");
+        let agents = Arc::new(AgentManager::new(workspaces_dir));
+        logger.log_info("app_started", "Theorem core initialized");
         Ok(Self {
             db: RwLock::new(db),
             storage,
             logger,
+            agents,
         })
+    }
+
+    pub async fn set_agent_event_emitter(&self, emitter: EventEmitter) {
+        self.agents.set_emitter(emitter).await;
     }
 
     pub async fn bootstrap(&self) -> AppResult<BootstrapState> {
@@ -318,7 +330,7 @@ impl AppState {
         let (document_count, attachment_count) = library_repo::counts(db.pool()).await?;
         drop(db);
 
-        let database_bytes = self.storage.file_size("database/formuladesk.db");
+        let database_bytes = self.storage.file_size("database/theorem.db");
         let originals_bytes = self.storage.dir_size("attachments/originals");
         let thumbnails_bytes = self.storage.dir_size("thumbnails");
         let backups_bytes = self.storage.dir_size("backups");
@@ -714,5 +726,372 @@ mod tests {
             .await
             .expect("doc after tag delete");
         assert!(after_tag_del.tags.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_phase2_mock_end_to_end_workflow_and_restart_recovery() {
+        use crate::agents::adapter::PermissionDecision;
+        use crate::domain::{
+            GenerateSolutionRequest, RecognizeProblemsRequest, SaveSolutionEditRequest,
+            SendChatMessageRequest,
+        };
+
+        let dir = TempDir::new().expect("tempdir");
+        let state = AppState::initialize(dir.path().to_path_buf())
+            .await
+            .expect("init");
+        let boot = state.bootstrap().await.expect("bootstrap");
+        let math_id = boot.subjects[0].id.clone();
+
+        // Find seeded Mock profile
+        let profiles = state.list_agent_profiles().await.expect("profiles");
+        let mock_profile = profiles
+            .iter()
+            .find(|p| p.provider_kind == "mock")
+            .expect("mock profile seeded")
+            .clone();
+
+        // Import image problem
+        let png_b64 = STANDARD.encode(sample_png_bytes());
+        let imported = state
+            .import_file_bytes(&math_id, None, "gaussian_integral.png", &png_b64)
+            .await
+            .expect("import png");
+        let doc_id = imported.detail.document.id.clone();
+
+        // 1. Problem recognition via MockAdapter
+        let rec = state
+            .recognize_problems(&RecognizeProblemsRequest {
+                document_id: doc_id.clone(),
+                agent_profile_id: Some(mock_profile.id.clone()),
+                model_name: Some("mock-math-pro".to_string()),
+                recognition_mode: "printed_only".to_string(),
+                page_range_start: None,
+                page_range_end: None,
+                page_images: Vec::new(),
+                cropped_region_png_base64: None,
+            })
+            .await
+            .expect("recognize");
+        assert!(rec.schema_issues.is_empty());
+        assert_eq!(rec.problems.len(), 1);
+        let prob_id = rec.problems[0].id.clone();
+
+        // 2. Split & merge problem editing
+        let after_split = state
+            .split_problem(&prob_id, "前半の問題文", "後半の小問", Some("(2)"))
+            .await
+            .expect("split");
+        assert_eq!(after_split.len(), 2);
+        let after_merge = state
+            .merge_problems(&after_split[0].id, &after_split[1].id)
+            .await
+            .expect("merge");
+        assert_eq!(after_merge.len(), 1);
+
+        // 3. Solution generation + Schema v1 validation + Typst PDF compilation (v1)
+        let generated = state
+            .generate_solution(&GenerateSolutionRequest {
+                document_id: doc_id.clone(),
+                problem_id: Some(prob_id.clone()),
+                agent_profile_id: Some(mock_profile.id.clone()),
+                model_name: Some("mock-math-pro".to_string()),
+                mode: "detailed".to_string(),
+                target_scope: "single_problem".to_string(),
+                page_range_start: None,
+                page_range_end: None,
+                repair_feedback: None,
+                parent_solution_id: None,
+            })
+            .await
+            .expect("generate solution");
+        assert!(generated.schema_issues.is_empty());
+        assert!(generated.latex_errors.is_empty());
+        assert!(generated.pdf_error.is_none());
+        assert_eq!(generated.solution.version_number, 1);
+        assert!(generated.solution.is_current);
+        assert!(generated.solution.pdf_attachment_id.is_some());
+
+        // Verify compiled PDF bytes are real PDF
+        let pdf_att_id = generated
+            .solution
+            .pdf_attachment_id
+            .clone()
+            .expect("pdf attachment");
+        let pdf_bin = state
+            .read_attachment_base64(&pdf_att_id)
+            .await
+            .expect("read pdf");
+        let pdf_raw = STANDARD.decode(&pdf_bin.base64_data).expect("decode pdf");
+        assert!(pdf_raw.starts_with(b"%PDF-"));
+
+        // 4. Non-destructive manual edit (v2) + restore v1 -> creates v3
+        let edited_json = generated.solution.structured_json.replace(
+            "ガウス積分の計算と収束の証明",
+            "ガウス積分の厳密解答（手動改訂）",
+        );
+        let v2 = state
+            .save_solution_edit(&SaveSolutionEditRequest {
+                document_id: doc_id.clone(),
+                problem_id: Some(prob_id.clone()),
+                parent_solution_id: Some(generated.solution.id.clone()),
+                mode: "detailed".to_string(),
+                structured_json: edited_json,
+                change_summary: Some("タイトル修正".to_string()),
+            })
+            .await
+            .expect("save v2");
+        assert_eq!(v2.solution.version_number, 2);
+        assert_eq!(v2.solution.validation_status, "user_edited");
+
+        let v3 = state
+            .restore_solution_version(&generated.solution.id)
+            .await
+            .expect("restore v1 as v3");
+        assert_eq!(v3.solution.version_number, 3);
+        let all_versions = state
+            .list_solutions(&doc_id, Some(&prob_id))
+            .await
+            .expect("list versions");
+        assert_eq!(all_versions.len(), 3);
+        assert_eq!(all_versions.iter().filter(|s| s.is_current).count(), 1);
+
+        // 5. Chat streaming, session resume, cancellation, and permission response
+        let conv = state
+            .create_conversation(
+                &doc_id,
+                Some(&prob_id),
+                Some(&v3.solution.id),
+                "質問スレッド",
+            )
+            .await
+            .expect("conv");
+        let turn1 = state
+            .send_chat_message(&SendChatMessageRequest {
+                conversation_id: conv.id.clone(),
+                document_id: doc_id.clone(),
+                agent_profile_id: Some(mock_profile.id.clone()),
+                model_name: Some("mock-math-pro".to_string()),
+                content_markdown: "ヤコビアン r はなぜ必要ですか？".to_string(),
+                referenced_problem_id: Some(prob_id.clone()),
+                include_problem_context: true,
+                include_solution_context: true,
+                attached_images: Vec::new(),
+            })
+            .await
+            .expect("chat turn 1");
+        assert_eq!(turn1.assistant_message.status, "completed");
+        assert!(!turn1.assistant_message.content_markdown.is_empty());
+
+        // Second turn reuses/resumes session
+        let turn2 = state
+            .send_chat_message(&SendChatMessageRequest {
+                conversation_id: conv.id.clone(),
+                document_id: doc_id.clone(),
+                agent_profile_id: Some(mock_profile.id.clone()),
+                model_name: Some("mock-math-pro".to_string()),
+                content_markdown: "極座標の範囲も教えてください".to_string(),
+                referenced_problem_id: Some(prob_id.clone()),
+                include_problem_context: false,
+                include_solution_context: false,
+                attached_images: Vec::new(),
+            })
+            .await
+            .expect("chat turn 2");
+        assert!(turn2.resumed_external_session);
+
+        // Verify permission decision channel works end-to-end
+        let state_arc = Arc::new(state);
+        let (perm_tx, mut perm_rx) = tokio::sync::mpsc::unbounded_channel::<(String, String)>();
+        state_arc
+            .set_agent_event_emitter(Arc::new(move |env| {
+                if let crate::domain::AgentEventPayload::PermissionRequested {
+                    request_id, ..
+                } = &env.event
+                {
+                    let _ = perm_tx.send((env.run_id.clone(), request_id.clone()));
+                }
+            }))
+            .await;
+
+        let state_for_perm = Arc::clone(&state_arc);
+        tokio::spawn(async move {
+            if let Some((rid, req_id)) = perm_rx.recv().await {
+                let _ = state_for_perm
+                    .respond_agent_permission(&rid, &req_id, PermissionDecision::Deny)
+                    .await;
+            }
+        });
+        let perm_turn = state_arc
+            .send_chat_message(&SendChatMessageRequest {
+                conversation_id: conv.id.clone(),
+                document_id: doc_id.clone(),
+                agent_profile_id: Some(mock_profile.id.clone()),
+                model_name: None,
+                content_markdown: "[TEST_PERMISSION]".to_string(),
+                referenced_problem_id: None,
+                include_problem_context: false,
+                include_solution_context: false,
+                attached_images: Vec::new(),
+            })
+            .await
+            .expect("permission turn");
+        assert!(
+            perm_turn
+                .assistant_message
+                .content_markdown
+                .contains("拒否")
+        );
+
+        // 6. Restart persistence check (problems, 3 solution versions, conversation history all survive)
+        drop(state_arc);
+        let restarted = AppState::initialize(dir.path().to_path_buf())
+            .await
+            .expect("re-init");
+        assert_eq!(restarted.list_problems(&doc_id).await.expect("p").len(), 1);
+        assert_eq!(
+            restarted
+                .list_solutions(&doc_id, Some(&prob_id))
+                .await
+                .expect("s")
+                .len(),
+            3
+        );
+        assert_eq!(restarted.list_messages(&conv.id).await.expect("m").len(), 6);
+    }
+
+    /// Live real-harness verification against locally installed & authenticated OpenAI Codex CLI.
+    /// Explicitly gated with `#[ignore]` so CI stays hermetic while allowing live verification via:
+    /// `cargo test -- --ignored test_live_codex_full_phase2_workflow --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn test_live_codex_full_phase2_workflow() {
+        use crate::domain::{
+            GenerateSolutionRequest, RecognizeProblemsRequest, SendChatMessageRequest,
+        };
+
+        let dir = TempDir::new().expect("tempdir");
+        let state = AppState::initialize(dir.path().to_path_buf())
+            .await
+            .expect("init");
+        let boot = state.bootstrap().await.expect("bootstrap");
+        let math_id = boot.subjects[0].id.clone();
+
+        let profiles = state.list_agent_profiles().await.expect("profiles");
+        let codex_profile = profiles
+            .iter()
+            .find(|p| p.provider_kind == "codex")
+            .expect("codex profile")
+            .clone();
+
+        let status = state
+            .check_agent_status(&codex_profile.id)
+            .await
+            .expect("check codex status");
+        assert!(
+            status.installed,
+            "codex CLI must be installed for live test"
+        );
+        assert_eq!(status.auth_status, "authenticated");
+
+        // Load Phase 0 test problem image (`2X + 3 = 11`)
+        let img_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("poc")
+            .join("mock-acp-agent")
+            .join("test_problem.png");
+        let img_bytes = std::fs::read(&img_path).expect("read poc test_problem.png");
+        let imported = state
+            .import_file_bytes(
+                &math_id,
+                None,
+                "test_problem.png",
+                &STANDARD.encode(&img_bytes),
+            )
+            .await
+            .expect("import test problem");
+        let doc_id = imported.detail.document.id.clone();
+
+        // 1. Live Recognition
+        let rec = state
+            .recognize_problems(&RecognizeProblemsRequest {
+                document_id: doc_id.clone(),
+                agent_profile_id: Some(codex_profile.id.clone()),
+                model_name: None,
+                recognition_mode: "printed_only".to_string(),
+                page_range_start: None,
+                page_range_end: None,
+                page_images: Vec::new(),
+                cropped_region_png_base64: None,
+            })
+            .await
+            .expect("live recognition");
+        assert!(
+            rec.schema_issues.is_empty(),
+            "live recognition schema issues: {:?}",
+            rec.schema_issues
+        );
+        assert!(!rec.problems.is_empty());
+        let prob_id = rec.problems[0].id.clone();
+
+        // 2. Live Solution Generation + Typst PDF
+        let generated = state
+            .generate_solution(&GenerateSolutionRequest {
+                document_id: doc_id.clone(),
+                problem_id: Some(prob_id.clone()),
+                agent_profile_id: Some(codex_profile.id.clone()),
+                model_name: None,
+                mode: "standard".to_string(),
+                target_scope: "single_problem".to_string(),
+                page_range_start: None,
+                page_range_end: None,
+                repair_feedback: None,
+                parent_solution_id: None,
+            })
+            .await
+            .expect("live solution");
+        assert!(
+            generated.schema_issues.is_empty(),
+            "schema issues: {:?}",
+            generated.schema_issues
+        );
+        assert!(
+            generated.latex_errors.is_empty(),
+            "latex errors: {:?}",
+            generated.latex_errors
+        );
+        assert!(
+            generated.pdf_error.is_none(),
+            "pdf error: {:?}",
+            generated.pdf_error
+        );
+        assert!(generated.solution.pdf_attachment_id.is_some());
+
+        // 3. Live Chat streaming + restart persistence
+        let conv = state
+            .create_conversation(
+                &doc_id,
+                Some(&prob_id),
+                Some(&generated.solution.id),
+                "実機確認チャット",
+            )
+            .await
+            .expect("conv");
+        let chat = state
+            .send_chat_message(&SendChatMessageRequest {
+                conversation_id: conv.id.clone(),
+                document_id: doc_id.clone(),
+                agent_profile_id: Some(codex_profile.id.clone()),
+                model_name: None,
+                content_markdown: "この方程式の解を検算して一言で答えてください。".to_string(),
+                referenced_problem_id: Some(prob_id.clone()),
+                include_problem_context: true,
+                include_solution_context: true,
+                attached_images: Vec::new(),
+            })
+            .await
+            .expect("live chat");
+        assert_eq!(chat.assistant_message.status, "completed");
+        assert!(chat.assistant_message.content_markdown.contains('4'));
     }
 }
